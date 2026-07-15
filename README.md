@@ -9,6 +9,26 @@ trade tick and 1-second candle.
 This is a separate, independently-built edition of the PulseChart app —
 same engine, its own branding, its own project folder, its own exe.
 
+## Download for Mac
+
+**[⬇ Download TohtoeStockPredictionsForMac.dmg](https://github.com/winsuper/tohtoes-stock-predictions/releases/download/mac-latest/TohtoeStockPredictionsForMac.dmg)**
+(or see the [latest release](https://github.com/winsuper/tohtoes-stock-predictions/releases/tag/mac-latest) page)
+
+1. Download the `.dmg` from the link above — no GitHub account needed.
+2. Open it, then drag **Tohtoe's Stock Predictions for Mac.app** onto the
+   **Applications** shortcut shown in the window.
+3. Open **Applications** and **right-click → Open** the app the first time
+   (it's unsigned, so double-clicking alone gets blocked by Gatekeeper —
+   right-click → Open shows an "Open anyway" prompt; you only need to do
+   this once).
+4. On first launch, open **Settings** in the app and paste in a free
+   Finnhub API key from https://finnhub.io/register to enable live data.
+
+This build is produced automatically by
+[`.github/workflows/build-mac.yml`](.github/workflows/build-mac.yml) on
+GitHub's own macOS runners every time `main` is updated — see
+[Building the macOS app](#building-the-macos-app) below for how it works.
+
 ## How it works
 
 - **Data feed**: connects to [Finnhub](https://finnhub.io)'s free real-time
@@ -69,6 +89,32 @@ Produces `dist\TohtoeStockPredictions.exe`. Put your `.env` (with your
 Finnhub key) next to the exe — it's portable, along with `data\` (SQLite
 db) and `logs\tohtoe.log` (diagnostics), all written beside wherever the
 exe lives rather than baked into the bundle.
+
+## Building the macOS app
+
+PyInstaller can't cross-compile, so a macOS build has to run on macOS. Two
+ways to get one:
+
+- **Automatic (recommended)**: every push to `main` runs
+  [`.github/workflows/build-mac.yml`](.github/workflows/build-mac.yml) on a
+  GitHub-hosted macOS runner, which builds the `.app`, packages it into a
+  `.dmg`, and publishes it to the
+  [`mac-latest` release](https://github.com/winsuper/tohtoes-stock-predictions/releases/tag/mac-latest) —
+  see [Download for Mac](#download-for-mac) above. No local Mac required.
+  Trigger it manually anytime from the repo's **Actions** tab
+  (**Build macOS app** → **Run workflow**).
+- **Locally, on a Mac**:
+  ```
+  python3 -m venv .venv
+  source .venv/bin/activate
+  pip install -r requirements.txt -r requirements-build.txt
+  pyinstaller tohtoe.spec --noconfirm
+  ./build_dmg.sh
+  ```
+  Produces `dist/Tohtoe's Stock Predictions for Mac.app` and
+  `dist/TohtoeStockPredictionsForMac.dmg`. The app is unsigned (no Apple
+  Developer ID involved), so first launch needs right-click → Open to get
+  past Gatekeeper.
 
 ## Notes
 
