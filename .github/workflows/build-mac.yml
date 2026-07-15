@@ -8,6 +8,9 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
+permissions:
+  contents: write  # needed to publish the release below
+
 jobs:
   build:
     runs-on: macos-latest
@@ -36,3 +39,16 @@ jobs:
           name: TohtoeStockPredictionsForMac
           path: dist/TohtoeStockPredictionsForMac.dmg
           if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mac-latest
+          name: "Tohtoe's Stock Predictions for Mac (latest)"
+          body: |
+            Automatically built from the latest `main` on GitHub's macOS runners.
+            Download `TohtoeStockPredictionsForMac.dmg` below, open it, and drag
+            the app onto the Applications shortcut. It's unsigned, so the first
+            launch needs right-click > Open to get past Gatekeeper.
+          files: dist/TohtoeStockPredictionsForMac.dmg
+          make_latest: true
