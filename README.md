@@ -14,15 +14,25 @@ same engine, its own branding, its own project folder, its own exe.
 **[⬇ Download TohtoeStockPredictionsForMac.dmg](https://github.com/winsuper/tohtoes-stock-predictions/releases/download/mac-latest/TohtoeStockPredictionsForMac.dmg)**
 (or see the [latest release](https://github.com/winsuper/tohtoes-stock-predictions/releases/tag/mac-latest) page)
 
-1. Download the `.dmg` from the link above — no GitHub account needed.
-2. Open it, then drag **Tohtoe's Stock Predictions for Mac.app** onto the
-   **Applications** shortcut shown in the window.
-3. Open **Applications** and **right-click → Open** the app the first time
-   (it's unsigned, so double-clicking alone gets blocked by Gatekeeper —
-   right-click → Open shows an "Open anyway" prompt; you only need to do
-   this once).
-4. On first launch, open **Settings** in the app and paste in a free
-   Finnhub API key from https://finnhub.io/register to enable live data.
+1. Open the downloaded `.dmg` file
+2. Drag **"Tohtoe's Stock Predictions for Mac.app"** onto the **Applications**
+   shortcut in the window that pops up
+3. Eject the `.dmg` (right-click it on the Desktop → Eject), it's not needed
+   anymore
+
+**First launch (unsigned app, one-time step):**
+
+4. Open **Applications** in Finder, find the app
+5. **Right-click → Open** (not double-click) — a dialog will warn it's from
+   an unidentified developer, click **Open anyway**
+6. After this first time, you can launch it normally (double-click,
+   Spotlight, Dock, etc.)
+
+**First-run setup:**
+
+7. In the app, open **Settings**, get a free key from
+   [finnhub.io/register](https://finnhub.io/register), and paste it in —
+   this enables the live real-time data feed
 
 This build is produced automatically by
 [`.github/workflows/build-mac.yml`](.github/workflows/build-mac.yml) on
