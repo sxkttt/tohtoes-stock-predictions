@@ -34,6 +34,20 @@ same engine, its own branding, its own project folder, its own exe.
    [finnhub.io/register](https://finnhub.io/register), and paste it in —
    this enables the live real-time data feed
 
+**Still blocked / no "Open Anyway" button in the right-click dialog?**
+Some macOS versions hide it there and put it elsewhere instead:
+
+- Go to **System Settings → Privacy & Security**, scroll down — you'll see
+  a message like *"Tohtoe's Stock Predictions for Mac was blocked..."* with
+  an **Open Anyway** button next to it. Click it, then confirm once more
+  when prompted.
+- Or, in Terminal, clear the quarantine flag macOS attaches to anything
+  downloaded from the internet:
+  ```
+  xattr -cr "/Applications/Tohtoe's Stock Predictions for Mac.app"
+  ```
+  Then open the app normally.
+
 This build is produced automatically by
 [`.github/workflows/build-mac.yml`](.github/workflows/build-mac.yml) on
 GitHub's own macOS runners every time `main` is updated — see
