@@ -9,6 +9,7 @@ spike, an inverted yield curve, or a sharply rising 10-year yield is
 exactly how that kind of risk shows up in markets. Sourced from Yahoo's
 public chart endpoint (no key needed).
 """
+import asyncio
 import logging
 import time
 
@@ -48,6 +49,16 @@ _SECTOR_ETF_KEYWORDS = [
 ]
 
 _sector_cache: dict[str, tuple[float, dict | None]] = {}
+
+SECTOR_ETF_NAMES = {
+    "XLK": "Technology", "XLF": "Financials", "XLV": "Health Care", "XLE": "Energy",
+    "XLI": "Industrials", "XLRE": "Real Estate", "XLY": "Consumer Discretionary",
+    "XLP": "Consumer Staples", "XLB": "Materials", "XLU": "Utilities", "XLC": "Communication Services",
+}
+
+_heatmap_cache: list[dict] | None = None
+_heatmap_cached_at: float = 0.0
+_HEATMAP_CACHE_TTL_SECONDS = 600  # market-wide breadth doesn't need to be fresher than 10 min
 
 
 def _map_industry_to_etf(industry: str | None) -> str | None:
@@ -189,3 +200,48 @@ async def fetch_sector_trend(industry: str | None) -> dict | None:
         regime = {**regime, "etf": etf}
     _sector_cache[etf] = (time.time(), regime)
     return regime
+
+
+async def _fetch_day_change(client: httpx.AsyncClient, etf: str) -> dict | None:
+    resp = await client.get(
+        YAHOO_CHART_URL.format(symbol=etf),
+        params={"range": "5d", "interval": "1d"},
+        headers=_HEADERS,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    results = payload.get("chart", {}).get("result") or []
+    if not results:
+        return None
+    r = results[0]
+    closes = (r.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+    closes = [c for c in closes if c is not None]
+    if len(closes) < 2:
+        return None
+    current, prev = closes[-1], closes[-2]
+    return {"price": current, "change_pct": (current - prev) / prev * 100 if prev else 0.0}
+
+
+async def fetch_sector_heatmap() -> list[dict]:
+    """Day % change for all 11 SPDR sector ETFs -- a market-wide "what's
+    hot/cold today" breadth view. Cached for 10 minutes."""
+    global _heatmap_cache, _heatmap_cached_at
+    if _heatmap_cache is not None and time.time() - _heatmap_cached_at < _HEATMAP_CACHE_TTL_SECONDS:
+        return _heatmap_cache
+
+    etfs = list(SECTOR_ETF_NAMES)
+    async with httpx.AsyncClient(timeout=10) as client:
+        results = await asyncio.gather(*[_fetch_day_change(client, etf) for etf in etfs], return_exceptions=True)
+
+    heatmap = []
+    for etf, res in zip(etfs, results):
+        if isinstance(res, Exception) or res is None:
+            if isinstance(res, Exception):
+                log.warning("macro sector heatmap fetch failed for %s", etf)
+            heatmap.append({"etf": etf, "name": SECTOR_ETF_NAMES[etf], "price": None, "change_pct": None})
+        else:
+            heatmap.append({"etf": etf, "name": SECTOR_ETF_NAMES[etf], "price": res["price"], "change_pct": res["change_pct"]})
+
+    _heatmap_cache = heatmap
+    _heatmap_cached_at = time.time()
+    return heatmap

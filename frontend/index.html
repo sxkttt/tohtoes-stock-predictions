@@ -12,6 +12,12 @@
 </head>
 <body>
 
+  <div id="update-banner" class="update-banner hidden-screen">
+    <span id="update-banner-text"></span>
+    <a id="update-banner-link" href="#" target="_blank" rel="noopener">Download</a>
+    <button id="update-banner-dismiss" aria-label="Dismiss">&times;</button>
+  </div>
+
   <div id="start-screen" class="start-screen">
     <canvas id="start-particles" class="start-particles"></canvas>
     <div class="start-glow start-glow-a"></div>
@@ -19,6 +25,9 @@
 
     <button id="settings-btn-start" class="settings-btn settings-btn-corner" title="Settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
+    <button id="theme-btn-start" class="settings-btn settings-btn-corner theme-btn-start" title="Toggle light/dark theme" aria-label="Toggle light/dark theme">
+      <svg id="theme-icon-start" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
     </button>
 
     <div class="start-content">
@@ -67,6 +76,30 @@
           </span>
           <span class="menu-title">Advisor</span>
           <span class="menu-sub">Buy/sell zones &amp; analysis</span>
+        </button>
+
+        <button class="menu-card" id="menu-watchlist" style="--d:5">
+          <span class="menu-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12,2 15,9 22,9.3 16.5,14 18.2,21 12,17.3 5.8,21 7.5,14 2,9.3 9,9"></polygon></svg>
+          </span>
+          <span class="menu-title">Watchlist</span>
+          <span class="menu-sub" id="watchlist-sub">Nothing pinned yet</span>
+        </button>
+
+        <button class="menu-card" id="menu-portfolio" style="--d:6">
+          <span class="menu-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M18.7 8l-5.1 5.1-2.7-2.7L7 14.3"></path></svg>
+          </span>
+          <span class="menu-title">Portfolio</span>
+          <span class="menu-sub">Paper-trade &amp; track P&amp;L</span>
+        </button>
+
+        <button class="menu-card" id="menu-sectors" style="--d:7">
+          <span class="menu-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect></svg>
+          </span>
+          <span class="menu-title">Sector Heatmap</span>
+          <span class="menu-sub">What's hot/cold today</span>
         </button>
       </div>
 
@@ -168,6 +201,9 @@
 
         <div class="advisor-tf-chips" id="advisor-tf-chips"></div>
 
+        <p class="advisor-summary" id="advisor-summary"></p>
+        <div class="advisor-sparkline-row" id="advisor-sparkline-row"></div>
+
         <div class="advisor-ladder">
           <div class="advisor-ladder-col">
             <h4 class="advisor-ladder-title buy">Buy Zone</h4>
@@ -181,13 +217,105 @@
 
         <div class="advisor-stop-loss" id="advisor-stop-loss"></div>
         <div class="advisor-risk-reward" id="advisor-risk-reward"></div>
+
+        <div class="advisor-position-sizer">
+          <div class="position-sizer-title">Position Size Calculator</div>
+          <div class="position-sizer-inputs">
+            <label>Account size ($)
+              <input type="number" id="sizer-account" min="0" step="100" value="10000">
+            </label>
+            <label>Risk per trade (%)
+              <input type="number" id="sizer-risk-pct" min="0.1" max="100" step="0.1" value="1">
+            </label>
+          </div>
+          <div class="position-sizer-output" id="sizer-output"></div>
+        </div>
+
         <div class="advisor-warnings" id="advisor-warnings"></div>
         <div class="advisor-factors" id="advisor-factors"></div>
+        <details class="advisor-factor-group" id="advisor-options-section">
+          <summary>Options Sentiment</summary>
+          <div id="advisor-options-body" class="advisor-options-body"></div>
+        </details>
+        <div class="advisor-track-record" id="advisor-track-record"></div>
 
         <p class="about-disclaimer">Rule-based analysis blending multiple timeframes, fundamentals, analyst/earnings/insider sentiment, and market conditions (VIX, yield curve, S&amp;P 500 &amp; sector regime) — for informational purposes only, not financial advice.</p>
       </div>
     </div>
   </div>
+
+  <div id="watchlist-modal" class="modal-backdrop">
+    <div class="modal watchlist-modal">
+      <button class="modal-close" id="watchlist-close" aria-label="Close">&times;</button>
+      <h2>Watchlist</h2>
+
+      <div class="watchlist-add-row">
+        <input id="watchlist-add-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Add a ticker, e.g. AAPL">
+        <button class="btn-primary" id="watchlist-add-btn" type="button">Add</button>
+        <button id="watchlist-analyze-all-btn" type="button">Analyze All</button>
+      </div>
+
+      <div id="watchlist-empty" class="watchlist-empty hidden-screen">Nothing pinned yet — add a ticker above, or use the star button while viewing a chart.</div>
+      <div id="watchlist-items" class="watchlist-items"></div>
+    </div>
+  </div>
+
+  <div id="portfolio-modal" class="modal-backdrop">
+    <div class="modal portfolio-modal">
+      <button class="modal-close" id="portfolio-close" aria-label="Close">&times;</button>
+      <h2>Paper Trading Portfolio</h2>
+
+      <div class="portfolio-log-form">
+        <input id="trade-symbol" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Symbol">
+        <select id="trade-side">
+          <option value="buy">Buy</option>
+          <option value="sell">Sell</option>
+        </select>
+        <input id="trade-qty" type="number" min="0" step="any" placeholder="Qty">
+        <input id="trade-price" type="number" min="0" step="any" placeholder="Price">
+        <button class="btn-primary" id="trade-log-btn" type="button">Log Trade</button>
+      </div>
+      <div id="portfolio-error" class="api-key-message err hidden-screen"></div>
+
+      <div class="portfolio-summary" id="portfolio-summary"></div>
+      <div id="portfolio-empty" class="watchlist-empty hidden-screen">No paper trades logged yet.</div>
+      <div id="portfolio-positions" class="portfolio-positions"></div>
+    </div>
+  </div>
+
+  <div id="sectors-modal" class="modal-backdrop">
+    <div class="modal sectors-modal">
+      <button class="modal-close" id="sectors-close" aria-label="Close">&times;</button>
+      <h2>Sector Heatmap</h2>
+      <p class="sectors-sub">Day % change across the 11 SPDR sector ETFs.</p>
+      <div id="sectors-grid" class="sectors-grid"></div>
+    </div>
+  </div>
+
+  <div id="alerts-modal" class="modal-backdrop">
+    <div class="modal alerts-modal">
+      <button class="modal-close" id="alerts-close" aria-label="Close">&times;</button>
+      <h2>Alerts</h2>
+
+      <div class="alerts-create-form">
+        <input id="alert-symbol" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Symbol">
+        <select id="alert-kind">
+          <option value="price_above">Price rises above…</option>
+          <option value="price_below">Price falls below…</option>
+          <option value="pattern">New candlestick pattern (1D)</option>
+          <option value="verdict_change">Advisor verdict changes</option>
+          <option value="earnings_reminder">Earnings coming up</option>
+        </select>
+        <input id="alert-price" type="number" min="0" step="any" placeholder="Price" class="alert-price-input">
+        <button class="btn-primary" id="alert-create-btn" type="button">Create</button>
+      </div>
+
+      <div id="alerts-empty" class="watchlist-empty hidden-screen">No alerts set yet.</div>
+      <div id="alerts-list" class="alerts-list"></div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
 
   <div id="app-shell" class="app hidden-screen">
     <header class="topbar">
@@ -199,6 +327,19 @@
       </button>
       <button id="advisor-btn-dash" class="home-btn" title="Advisor" aria-label="Advisor">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"></path><path d="M12 18v4"></path><path d="M4.93 4.93l2.83 2.83"></path><path d="M16.24 16.24l2.83 2.83"></path><path d="M2 12h4"></path><path d="M18 12h4"></path><path d="M4.93 19.07l2.83-2.83"></path><path d="M16.24 7.76l2.83-2.83"></path><circle cx="12" cy="12" r="3"></circle></svg>
+      </button>
+      <button id="theme-btn-dash" class="home-btn" title="Toggle light/dark theme" aria-label="Toggle light/dark theme">
+        <svg id="theme-icon-dash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+      </button>
+      <button id="export-btn-dash" class="home-btn" title="Export chart as PNG" aria-label="Export chart as PNG">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+      </button>
+      <button id="watchlist-star-btn" class="home-btn" title="Add/remove from watchlist" aria-label="Add/remove from watchlist">
+        <svg id="watchlist-star-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12,2 15,9 22,9.3 16.5,14 18.2,21 12,17.3 5.8,21 7.5,14 2,9.3 9,9"></polygon></svg>
+      </button>
+      <button id="alerts-btn-dash" class="home-btn" title="Alerts" aria-label="Alerts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+        <span id="alerts-badge" class="alerts-badge hidden-screen"></span>
       </button>
       <div class="brand">
         <span class="brand-dot"></span>
@@ -255,7 +396,38 @@
           <span class="interval-row-label">Candles:</span>
           <div class="period-buttons" id="interval-buttons"></div>
         </div>
-        <div id="chart"></div>
+
+        <div class="chart-tools-row">
+          <div class="chart-tools-group">
+            <span class="chart-tools-label">Indicators</span>
+            <button class="tool-btn" id="toggle-rsi" data-tool="rsi">RSI</button>
+            <button class="tool-btn" id="toggle-macd" data-tool="macd">MACD</button>
+            <button class="tool-btn" id="toggle-adx" data-tool="adx">ADX</button>
+            <button class="tool-btn" id="toggle-vwap" data-tool="vwap">VWAP</button>
+            <button class="tool-btn" id="toggle-volprofile" data-tool="volprofile">Vol Profile</button>
+          </div>
+          <div class="chart-tools-group">
+            <span class="chart-tools-label">Draw</span>
+            <button class="tool-btn draw-tool-btn active" data-draw="none" title="Select / pan">Select</button>
+            <button class="tool-btn draw-tool-btn" data-draw="horizontal" title="Horizontal line">Line</button>
+            <button class="tool-btn draw-tool-btn" data-draw="trendline" title="Trendline">Trend</button>
+            <button class="tool-btn draw-tool-btn" data-draw="fib" title="Fibonacci retracement">Fib</button>
+            <button class="tool-btn" id="clear-drawings-btn" title="Clear all drawings">Clear</button>
+          </div>
+          <div class="chart-tools-group compare-group">
+            <input id="compare-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Compare vs…">
+            <button class="tool-btn" id="compare-clear-btn" title="Clear compare">✕</button>
+          </div>
+        </div>
+
+        <div id="chart-wrap" class="chart-wrap">
+          <div id="chart"></div>
+          <canvas id="drawing-canvas" class="overlay-canvas"></canvas>
+          <canvas id="volprofile-canvas" class="overlay-canvas hidden-screen"></canvas>
+        </div>
+        <div id="rsi-pane" class="indicator-pane hidden-screen"></div>
+        <div id="macd-pane" class="indicator-pane hidden-screen"></div>
+        <div id="adx-pane" class="indicator-pane hidden-screen"></div>
       </section>
 
       <aside class="side-panel">
@@ -275,6 +447,12 @@
         <div class="panel-block">
           <h3>Support / Resistance</h3>
           <ul id="level-list" class="level-list">
+            <li class="empty">Waiting for data…</li>
+          </ul>
+        </div>
+        <div class="panel-block">
+          <h3>Upcoming Events</h3>
+          <ul id="event-list" class="level-list">
             <li class="empty">Waiting for data…</li>
           </ul>
         </div>

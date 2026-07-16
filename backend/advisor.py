@@ -541,15 +541,17 @@ def _score_fundamentals(context: dict | None, current_price: float) -> dict:
 
 # --- street/context scoring (analysts, news, earnings, insiders) ---------------
 
-def _score_street(context: dict | None) -> dict:
-    if not context or not context.get("available"):
+def _score_street(context: dict | None, options_data: dict | None = None) -> dict:
+    context_available = bool(context and context.get("available"))
+    options_available = bool(options_data and options_data.get("available"))
+    if not context_available and not options_available:
         return {"score": 0.0, "factors": [], "warnings": [], "raw_scores": []}
 
     factors = []
     weighted: list[tuple[float, float]] = []
     warnings = []
 
-    analyst = context.get("analyst")
+    analyst = context.get("analyst") if context_available else None
     if analyst:
         total = analyst["strongBuy"] + analyst["buy"] + analyst["hold"] + analyst["sell"] + analyst["strongSell"]
         if total:
@@ -563,7 +565,7 @@ def _score_street(context: dict | None) -> dict:
             })
             weighted.append((1.0, s))
 
-    news_tone = context.get("news_tone")
+    news_tone = context.get("news_tone") if context_available else None
     if news_tone is not None and context.get("news_count"):
         factors.append({
             "name": "Recent news tone", "score": round(news_tone, 2),
@@ -571,7 +573,7 @@ def _score_street(context: dict | None) -> dict:
         })
         weighted.append((0.9, news_tone))
 
-    earnings_surprises = context.get("earnings_surprises")
+    earnings_surprises = context.get("earnings_surprises") if context_available else None
     if earnings_surprises:
         beats, total_q, avg_pct = earnings_surprises["beats"], earnings_surprises["total"], earnings_surprises["avg_surprise_pct"]
         beat_ratio = beats / total_q
@@ -582,7 +584,7 @@ def _score_street(context: dict | None) -> dict:
         })
         weighted.append((1.1, s))
 
-    insider_mspr = context.get("insider_mspr")
+    insider_mspr = context.get("insider_mspr") if context_available else None
     if insider_mspr is not None:
         s = _clamp(insider_mspr / 40)
         if insider_mspr > 5:
@@ -594,7 +596,22 @@ def _score_street(context: dict | None) -> dict:
         factors.append({"name": "Insider sentiment", "score": round(s, 2), "detail": note})
         weighted.append((1.0, s))
 
-    next_earnings = context.get("next_earnings_date")
+    if options_available:
+        pcr = options_data.get("put_call_volume_ratio")
+        if pcr is not None:
+            if pcr > 1.2:
+                s = _clamp(-(pcr - 1.0) * 0.6)
+                note = f"Put/call volume ratio of {pcr:.2f} — options market leaning bearish/hedging."
+            elif pcr < 0.7:
+                s = _clamp((1.0 - pcr) * 0.6)
+                note = f"Put/call volume ratio of {pcr:.2f} — options market leaning bullish."
+            else:
+                s = 0.0
+                note = f"Put/call volume ratio of {pcr:.2f} — no strong skew."
+            factors.append({"name": "Options put/call ratio", "score": round(s, 2), "detail": note})
+            weighted.append((0.8, s))
+
+    next_earnings = context.get("next_earnings_date") if context_available else None
     if next_earnings:
         days_away = (date.fromisoformat(next_earnings) - date.today()).days
         if 0 <= days_away <= 7:
@@ -802,11 +819,53 @@ def _price_zones(candles: list[dict], overlay: dict, current_price: float, horiz
     return {"buy": buy, "sell": sell, "stop_loss": stop_loss}
 
 
+# --- plain-English narrative --------------------------------------------------------
+
+_GROUP_LABELS = {
+    "technical": "the charts", "fundamental": "the fundamentals",
+    "street": "analyst/news sentiment", "macro": "the broader market",
+}
+
+
+def _narrative(verdict: str, overall: float, weights: dict, tech: dict, fund: dict, street: dict,
+                macro_score: dict, alignment: float, risk_reward: float | None, horizon_label: str) -> str:
+    """One plain-English paragraph summarizing the verdict -- leads with
+    whichever factor group actually drove the score the most, flags any
+    group pulling the other way, and notes timeframe disagreement or a
+    thin risk/reward when relevant. Meant to be readable without opening
+    the factor breakdown."""
+    groups = [
+        ("technical", tech["score"], weights["technical"]),
+        ("fundamental", fund["score"], weights["fundamental"]),
+        ("street", street["score"], weights["street"]),
+        ("macro", macro_score["score"], weights["macro"]),
+    ]
+    contributions = sorted(groups, key=lambda g: abs(g[1] * g[2]), reverse=True)
+    strongest_name, strongest_score, _ = contributions[0]
+    direction = "bullish" if strongest_score > 0.05 else ("bearish" if strongest_score < -0.05 else "mixed")
+
+    sentences = [f"{verdict} for the {horizon_label.lower()}, driven mainly by {direction} signals from {_GROUP_LABELS[strongest_name]}."]
+
+    overall_sign = 1 if overall > 0.05 else (-1 if overall < -0.05 else 0)
+    conflicts = [g for g in groups if overall_sign != 0 and abs(g[1]) > 0.05 and (g[1] > 0) != (overall_sign > 0)]
+    if conflicts:
+        conflict_name, _, _ = max(conflicts, key=lambda g: abs(g[1]))
+        sentences.append(f"That said, {_GROUP_LABELS[conflict_name]} point the other way, so this isn't a unanimous picture.")
+
+    if alignment < 0.6:
+        sentences.append("The timeframes analyzed don't fully agree with each other either, which further tempers conviction.")
+
+    if risk_reward is not None and risk_reward < 1.5:
+        sentences.append(f"Risk/reward to the target is thin ({risk_reward:.1f}:1), worth weighing before sizing a position.")
+
+    return " ".join(sentences)
+
+
 # --- top-level entry point --------------------------------------------------------
 
 def analyze(
     candles_by_tf: dict[str, list[dict]], fundamentals_context: dict | None, macro_data: dict | None,
-    sector_data: dict | None, horizon: str = "medium",
+    sector_data: dict | None, horizon: str = "medium", options_data: dict | None = None,
 ) -> dict:
     if horizon not in HORIZON_CONFIG:
         horizon = "medium"
@@ -826,7 +885,7 @@ def analyze(
     overlay = patterns.support_resistance_and_trend(zone_candles)
 
     fund = _score_fundamentals(fundamentals_context, current_price)
-    street = _score_street(fundamentals_context)
+    street = _score_street(fundamentals_context, options_data)
     macro_score = _score_macro(macro_data, sector_data)
 
     overall = _clamp(
@@ -873,6 +932,9 @@ def analyze(
     if risk_reward is not None and risk_reward < 1.5:
         warnings.append(f"Risk/reward to the mid sell target is only {risk_reward:.1f}:1 — tighter than the 1.5:1 generally considered a reasonable setup.")
 
+    summary = _narrative(verdict, overall, weights, tech, fund, street, macro_score,
+                          tech["alignment"], risk_reward, HORIZON_LABELS[horizon])
+
     return {
         "verdict": verdict,
         "score": round(overall, 3),
@@ -880,6 +942,7 @@ def analyze(
         "current_price": current_price,
         "horizon": horizon,
         "horizon_label": HORIZON_LABELS[horizon],
+        "summary": summary,
         "timeframes": tech["timeframes"],
         "risk_reward": risk_reward,
         "buy": zones["buy"],

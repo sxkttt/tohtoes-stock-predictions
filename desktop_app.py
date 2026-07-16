@@ -1,6 +1,7 @@
 """Native desktop shell for Tohtoe's Stock Predictions: runs the FastAPI
 server in-process and displays it in a PySide6 window (no browser tab, no
 console window)."""
+import json
 import logging
 import multiprocessing
 import os
@@ -21,9 +22,14 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
 import uvicorn
-from PySide6.QtCore import QEvent, QUrl, Qt
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtCore import QEvent, QThread, QUrl, Qt, Signal
+from PySide6.QtWidgets import QApplication, QMainWindow, QStyle, QSystemTrayIcon
 from PySide6.QtWebEngineWidgets import QWebEngineView
+
+# Tohtoe's edition of the auto-update check compares its version.py against
+# this fork's GitHub repo; PulseChart never sets this, so the same endpoint
+# there just reports itself disabled.
+os.environ["UPDATE_REPO"] = "sxkttt/tohtoes-stock-predictions"
 
 from backend import config
 from backend.main import app as fastapi_app
@@ -99,6 +105,65 @@ class NoZoomWebEngineView(QWebEngineView):
         return super().event(event)
 
 
+class AlertPoller(QThread):
+    """Polls the alerts endpoint off the Qt main thread (network I/O has no
+    business blocking the UI) and emits any newly-fired events so the
+    window can turn them into native tray notifications -- this is what
+    makes alerts show up even while the app is minimized."""
+
+    events_found = Signal(list)
+
+    def __init__(self, base_url: str, parent=None):
+        super().__init__(parent)
+        self.base_url = base_url
+        self._running = True
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        while self._running:
+            try:
+                with urllib.request.urlopen(f"{self.base_url}api/alerts/pending", timeout=5) as resp:
+                    data = json.loads(resp.read().decode())
+                events = data.get("events") or []
+                if events:
+                    self.events_found.emit(events)
+                    ids = [e["id"] for e in events]
+                    req = urllib.request.Request(
+                        f"{self.base_url}api/alerts/seen",
+                        data=json.dumps({"ids": ids}).encode(),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    urllib.request.urlopen(req, timeout=5)
+            except Exception:
+                log.exception("alert poll failed")
+            self.msleep(15000)
+
+
+class UpdateChecker(QThread):
+    """One-shot check against /api/update-check, run once per app launch.
+    A no-op on editions that don't set UPDATE_REPO (the endpoint just
+    reports itself disabled), so this is safe to include unconditionally
+    rather than needing an edition-specific code path here too."""
+
+    update_found = Signal(dict)
+
+    def __init__(self, base_url: str, parent=None):
+        super().__init__(parent)
+        self.base_url = base_url
+
+    def run(self):
+        try:
+            with urllib.request.urlopen(f"{self.base_url}api/update-check", timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            if data.get("update_available"):
+                self.update_found.emit(data)
+        except Exception:
+            log.exception("update check failed")
+
+
 class MainWindow(QMainWindow):
     def __init__(self, url: str):
         super().__init__()
@@ -107,6 +172,34 @@ class MainWindow(QMainWindow):
         self.view = NoZoomWebEngineView()
         self.view.load(QUrl(url))
         self.setCentralWidget(self.view)
+
+        self.tray = QSystemTrayIcon(self.style().standardIcon(QStyle.SP_ComputerIcon), self)
+        self.tray.setToolTip(APP_NAME)
+        self.tray.show()
+
+        self.poller = AlertPoller(url)
+        self.poller.events_found.connect(self._on_alert_events)
+        self.poller.start()
+
+        self.update_checker = UpdateChecker(url)
+        self.update_checker.update_found.connect(self._on_update_found)
+        self.update_checker.start()
+
+    def _on_alert_events(self, events: list):
+        for e in events:
+            self.tray.showMessage(f"{APP_NAME} Alert", e["message"], QSystemTrayIcon.Information, 8000)
+
+    def _on_update_found(self, data: dict):
+        self.tray.showMessage(
+            f"{APP_NAME} Update Available",
+            f"Version {data.get('latest')} is available (you're on {data.get('current')}).",
+            QSystemTrayIcon.Information, 10000,
+        )
+
+    def closeEvent(self, event):
+        self.poller.stop()
+        self.poller.wait(2000)
+        super().closeEvent(event)
 
 
 def main():

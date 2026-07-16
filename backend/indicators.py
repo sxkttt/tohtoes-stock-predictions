@@ -54,18 +54,26 @@ def rsi(closes: list[float], period: int = 14) -> float | None:
     return float(100 - (100 / (1 + rs)))
 
 
+def macd_full(closes: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
+    """Full {macd, signal, histogram} series, one value per bar -- used to
+    draw the MACD sub-pane. Empty lists if there isn't enough data yet."""
+    if len(closes) < slow + signal:
+        return {"macd": [], "signal": [], "histogram": []}
+    fast_series = ema_series(closes, fast)
+    slow_series = ema_series(closes, slow)
+    macd_arr = fast_series - slow_series
+    signal_arr = ema_series(macd_arr.tolist(), signal)
+    hist_arr = macd_arr - signal_arr
+    return {"macd": macd_arr.tolist(), "signal": signal_arr.tolist(), "histogram": hist_arr.tolist()}
+
+
 def macd(closes: list[float], fast: int = 12, slow: int = 26, signal: int = 9):
     """Returns {macd, signal, histogram} using the last value of each EMA
     series, or None fields if there isn't enough data."""
-    if len(closes) < slow + signal:
+    full = macd_full(closes, fast, slow, signal)
+    if not full["macd"]:
         return {"macd": None, "signal": None, "histogram": None}
-    fast_series = ema_series(closes, fast)
-    slow_series = ema_series(closes, slow)
-    macd_series = fast_series - slow_series
-    signal_series = ema_series(macd_series.tolist(), signal)
-    macd_val = float(macd_series[-1])
-    signal_val = float(signal_series[-1])
-    return {"macd": macd_val, "signal": signal_val, "histogram": macd_val - signal_val}
+    return {"macd": full["macd"][-1], "signal": full["signal"][-1], "histogram": full["histogram"][-1]}
 
 
 def bollinger(closes: list[float], period: int = 20, num_std: float = 2.0):
@@ -143,14 +151,15 @@ def stochastic(candles: list[dict], k_period: int = 14, d_period: int = 3) -> di
     return {"k": float(k_values[-1]), "d": d}
 
 
-def adx(candles: list[dict], period: int = 14) -> dict:
-    """Wilder's Average Directional Index plus the latest +DI/-DI. ADX
-    measures trend *strength* regardless of direction (below ~20 = choppy/
-    range-bound, above ~25 = a real trend worth trusting); +DI vs -DI gives
-    the direction. Returns None fields if there isn't enough data."""
+def adx_full(candles: list[dict], period: int = 14) -> dict:
+    """Full Wilder's ADX/+DI/-DI series, one value per bar (None during
+    warm-up) -- used both by adx() below and to draw the ADX sub-pane."""
     n = len(candles)
+    adx_out: list[float | None] = [None] * n
+    plus_di_out: list[float | None] = [None] * n
+    minus_di_out: list[float | None] = [None] * n
     if n < 2 * period + 1:
-        return {"adx": None, "plus_di": None, "minus_di": None}
+        return {"adx": adx_out, "plus_di": plus_di_out, "minus_di": minus_di_out}
 
     highs = [c["high"] for c in candles]
     lows = [c["low"] for c in candles]
@@ -170,7 +179,7 @@ def adx(candles: list[dict], period: int = 14) -> dict:
     smoothed_plus = sum(plus_dm[1:period + 1])
     smoothed_minus = sum(minus_dm[1:period + 1])
 
-    dx_values = []
+    dx_values = []  # (index, dx, plus_di, minus_di)
     for i in range(period + 1, n):
         smoothed_tr = smoothed_tr - (smoothed_tr / period) + tr[i]
         smoothed_plus = smoothed_plus - (smoothed_plus / period) + plus_dm[i]
@@ -179,16 +188,31 @@ def adx(candles: list[dict], period: int = 14) -> dict:
         minus_di = 100 * smoothed_minus / smoothed_tr if smoothed_tr else 0.0
         denom = plus_di + minus_di
         dx = 100 * abs(plus_di - minus_di) / denom if denom else 0.0
-        dx_values.append((dx, plus_di, minus_di))
+        dx_values.append((i, dx, plus_di, minus_di))
+        plus_di_out[i] = plus_di
+        minus_di_out[i] = minus_di
 
     if len(dx_values) < period:
-        return {"adx": None, "plus_di": None, "minus_di": None}
+        return {"adx": adx_out, "plus_di": plus_di_out, "minus_di": minus_di_out}
 
-    adx_val = sum(d for d, _, _ in dx_values[:period]) / period
-    for d, _, _ in dx_values[period:]:
+    adx_val = sum(d for _, d, _, _ in dx_values[:period]) / period
+    adx_out[dx_values[period - 1][0]] = adx_val
+    for idx, d, _, _ in dx_values[period:]:
         adx_val = (adx_val * (period - 1) + d) / period
+        adx_out[idx] = adx_val
 
-    return {"adx": float(adx_val), "plus_di": float(dx_values[-1][1]), "minus_di": float(dx_values[-1][2])}
+    return {"adx": adx_out, "plus_di": plus_di_out, "minus_di": minus_di_out}
+
+
+def adx(candles: list[dict], period: int = 14) -> dict:
+    """Wilder's Average Directional Index plus the latest +DI/-DI. ADX
+    measures trend *strength* regardless of direction (below ~20 = choppy/
+    range-bound, above ~25 = a real trend worth trusting); +DI vs -DI gives
+    the direction. Returns None fields if there isn't enough data."""
+    full = adx_full(candles, period)
+    if not full["adx"] or full["adx"][-1] is None:
+        return {"adx": None, "plus_di": None, "minus_di": None}
+    return {"adx": full["adx"][-1], "plus_di": full["plus_di"][-1], "minus_di": full["minus_di"][-1]}
 
 
 def obv_series(candles: list[dict]) -> list[float]:

@@ -1,0 +1,49 @@
+name: Build Windows app
+
+# Builds TohtoeStockPredictions.exe on a GitHub-hosted Windows runner and
+# publishes it to the win-latest release, mirroring build-mac.yml. Lets
+# the desktop app's auto-update check point somewhere real on Windows too.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # needed to publish the release below
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build .exe
+        run: pyinstaller tohtoe.spec --noconfirm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TohtoeStockPredictions
+          path: dist/TohtoeStockPredictions.exe
+          if-no-files-found: error
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: win-latest
+          name: "Tohtoe's Stock Predictions for Windows (latest)"
+          body: |
+            Automatically built from the latest `main` on GitHub's Windows runners.
+            Download `TohtoeStockPredictions.exe` below and run it -- no installer,
+            it's portable. Put your Finnhub API key in via the in-app Settings screen
+            on first launch.
+          files: dist/TohtoeStockPredictions.exe
+          make_latest: false
