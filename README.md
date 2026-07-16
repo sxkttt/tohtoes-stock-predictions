@@ -11,8 +11,8 @@ same engine, its own branding, its own project folder, its own exe.
 
 ## Download for Mac
 
-**[⬇ Download TohtoeStockPredictionsForMac.dmg](https://github.com/winsuper/tohtoes-stock-predictions/releases/download/mac-latest/TohtoeStockPredictionsForMac.dmg)**
-(or see the [latest release](https://github.com/winsuper/tohtoes-stock-predictions/releases/tag/mac-latest) page)
+**[⬇ Download TohtoeStockPredictionsForMac.dmg](https://github.com/sxkttt/tohtoes-stock-predictions/releases/download/mac-latest/TohtoeStockPredictionsForMac.dmg)**
+(or see the [latest release](https://github.com/sxkttt/tohtoes-stock-predictions/releases/tag/mac-latest) page)
 
 1. Open the downloaded `.dmg` file
 2. Drag **"Tohtoe's Stock Predictions for Mac.app"** onto the **Applications**
@@ -123,7 +123,7 @@ ways to get one:
   [`.github/workflows/build-mac.yml`](.github/workflows/build-mac.yml) on a
   GitHub-hosted macOS runner, which builds the `.app`, packages it into a
   `.dmg`, and publishes it to the
-  [`mac-latest` release](https://github.com/winsuper/tohtoes-stock-predictions/releases/tag/mac-latest) —
+  [`mac-latest` release](https://github.com/sxkttt/tohtoes-stock-predictions/releases/tag/mac-latest) —
   see [Download for Mac](#download-for-mac) above. No local Mac required.
   Trigger it manually anytime from the repo's **Actions** tab
   (**Build macOS app** → **Run workflow**).
