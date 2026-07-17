@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from . import (
     advisor, alerts, config, db, econ_calendar, finnhub_feed, fundamentals, history,
-    indicators, macro, options, patterns, settings, symbols, version,
+    indicators, macro, market_status, news, options, patterns, settings, symbols, version,
 )
 from .candles import store
 
@@ -95,7 +95,9 @@ app.mount("/static", NoCacheStaticFiles(directory=FRONTEND_DIR), name="static")
 
 
 @app.get("/api/history/{symbol}")
-async def history_endpoint(symbol: str, response: Response, period: str = "LIVE", interval: str = ""):
+async def history_endpoint(
+    symbol: str, response: Response, period: str = "LIVE", interval: str = "", prepost: bool = False
+):
     # Historical/live candle data must always be fetched fresh -- never let
     # the browser's HTTP cache serve yesterday's "1D" window after midnight.
     response.headers["Cache-Control"] = "no-store"
@@ -104,6 +106,9 @@ async def history_endpoint(symbol: str, response: Response, period: str = "LIVE"
     if period not in PERIODS:
         period = "LIVE"
     interval = interval.lower().strip()
+    # Pre/post-market candles only make sense on an intraday view -- Yahoo
+    # ignores the flag on daily+ ranges anyway, but keep it explicit here.
+    prepost = prepost and period in ("LIVE", "1D", "1W")
 
     used_interval = None
     if period == "LIVE":
@@ -117,9 +122,9 @@ async def history_endpoint(symbol: str, response: Response, period: str = "LIVE"
     else:
         try:
             if interval:
-                candles, used_interval = await history.fetch_candles_custom(symbol, period, interval)
+                candles, used_interval = await history.fetch_candles_custom(symbol, period, interval, prepost)
             else:
-                candles = await history.fetch_candles(symbol, period)
+                candles = await history.fetch_candles(symbol, period, prepost)
                 used_interval = history.RANGE_INTERVAL_PRESETS[period][1]
         except Exception:
             logging.getLogger("main").exception("Yahoo history fetch failed for %s/%s/%s", symbol, period, interval)
@@ -321,6 +326,17 @@ async def calendar_endpoint(symbol: str):
 @app.get("/api/options/{symbol}")
 async def options_endpoint(symbol: str):
     return await options.fetch_options_sentiment(symbol.upper())
+
+
+@app.get("/api/news/{symbol}")
+async def news_endpoint(symbol: str):
+    return await news.fetch_news(symbol.upper())
+
+
+@app.get("/api/market-status")
+async def market_status_endpoint(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return market_status.get_market_status()
 
 
 # --- watchlist ----------------------------------------------------------------

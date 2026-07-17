@@ -215,6 +215,18 @@ const PATTERN_INFO = {
   let currentPeriod = "LIVE";
   let currentInterval = "";
 
+  // --- extended-hours (pre/post-market) toggle ---
+  const PREPOST_KEY = "tohtoe_prepost";
+  const PREPOST_PERIODS = new Set(["1D", "1W"]);
+  let prepostEnabled = localStorage.getItem(PREPOST_KEY) === "1";
+  const prepostBtn = document.getElementById("toggle-prepost");
+
+  function updatePrepostToggle(period) {
+    const applicable = PREPOST_PERIODS.has(period);
+    prepostBtn.classList.toggle("hidden-screen", !applicable);
+    prepostBtn.classList.toggle("active", applicable && prepostEnabled);
+  }
+
   // Which candle intervals Yahoo will serve for each period's range, and the
   // default interval that period already used before this selector existed --
   // mirrors backend/history.py's INTERVAL_COMPAT / RANGE_INTERVAL_PRESETS.
@@ -501,6 +513,7 @@ const PATTERN_INFO = {
     currentPeriod = period;
     updatePeriodButtons();
     renderIntervalButtons(period);
+    updatePrepostToggle(period);
     applyTimeScaleFormatting(period);
     teardownWs();
     clearChart();
@@ -512,7 +525,8 @@ const PATTERN_INFO = {
       const intervalParam = options
         ? (currentInterval && options.includes(currentInterval) ? currentInterval : INTERVAL_DEFAULTS[period])
         : "";
-      const url = `/api/history/${encodeURIComponent(currentSymbol)}?period=${period}` + (intervalParam ? `&interval=${intervalParam}` : "");
+      const prepostParam = PREPOST_PERIODS.has(period) && prepostEnabled ? "&prepost=1" : "";
+      const url = `/api/history/${encodeURIComponent(currentSymbol)}?period=${period}` + (intervalParam ? `&interval=${intervalParam}` : "") + prepostParam;
       const resp = await fetch(url);
       const data = await resp.json();
 
@@ -728,6 +742,12 @@ const PATTERN_INFO = {
     });
   });
 
+  prepostBtn.addEventListener("click", () => {
+    prepostEnabled = !prepostEnabled;
+    localStorage.setItem(PREPOST_KEY, prepostEnabled ? "1" : "0");
+    selectPeriod(currentPeriod, { allowFallback: false });
+  });
+
   // --- start screen: recent symbols, navigation, about modal ---
 
   const RECENTS_KEY = "tohtoe_recents";
@@ -763,6 +783,60 @@ const PATTERN_INFO = {
     });
   }
 
+  // --- "what changed" digest ---
+
+  const DIGEST_KEY = "tohtoe_digest_snapshot";
+  const DIGEST_MOVE_THRESHOLD = 3; // percent
+  let digestRequestId = 0;
+
+  async function renderDigest() {
+    const requestId = ++digestRequestId;
+    const digestCard = document.getElementById("digest-card");
+    const digestItemsEl = document.getElementById("digest-items");
+    try {
+      const resp = await fetch("/api/watchlist/quotes");
+      const data = await resp.json();
+      if (requestId !== digestRequestId) return; // a newer call already landed
+      const quotes = data.quotes || [];
+      if (!quotes.length) { digestCard.classList.add("hidden-screen"); return; }
+
+      let snapshot = {};
+      try { snapshot = JSON.parse(localStorage.getItem(DIGEST_KEY)) || {}; } catch (e) { snapshot = {}; }
+
+      const items = [];
+      quotes.forEach((q) => {
+        const prev = snapshot[q.symbol];
+        if (!prev) return;
+        if (prev.price != null && q.price != null && prev.price !== 0) {
+          const movePct = ((q.price - prev.price) / prev.price) * 100;
+          if (Math.abs(movePct) >= DIGEST_MOVE_THRESHOLD) {
+            items.push({
+              symbol: q.symbol, cls: movePct >= 0 ? "up" : "down",
+              text: `${movePct >= 0 ? "+" : ""}${movePct.toFixed(1)}% since last check`,
+            });
+          }
+        }
+        if (prev.verdict && q.last_verdict && prev.verdict !== q.last_verdict) {
+          items.push({ symbol: q.symbol, cls: "flip", text: `Verdict changed: ${prev.verdict} → ${q.last_verdict}` });
+        }
+      });
+
+      const newSnapshot = {};
+      quotes.forEach((q) => { newSnapshot[q.symbol] = { price: q.price, verdict: q.last_verdict }; });
+      localStorage.setItem(DIGEST_KEY, JSON.stringify(newSnapshot));
+
+      if (!items.length) { digestCard.classList.add("hidden-screen"); return; }
+      digestItemsEl.innerHTML = items.map((it) => `
+        <div class="digest-item ${it.cls}">
+          <span class="digest-item-symbol">${escapeHtml(it.symbol)}</span>
+          <span class="digest-item-text">${escapeHtml(it.text)}</span>
+        </div>`).join("");
+      digestCard.classList.remove("hidden-screen");
+    } catch (e) {
+      digestCard.classList.add("hidden-screen");
+    }
+  }
+
   function enterApp(symbol) {
     startScreen.classList.add("leaving");
     setTimeout(() => {
@@ -782,6 +856,7 @@ const PATTERN_INFO = {
       appShell.classList.remove("leaving-app");
       startScreen.classList.remove("hidden-screen");
       renderRecents();
+      renderDigest();
     }, 300);
   }
 
@@ -1596,6 +1671,69 @@ const PATTERN_INFO = {
     loadSectors();
   });
 
+  // --- news tab ---
+
+  const newsModal = document.getElementById("news-modal");
+  const newsSymbolLabelEl = document.getElementById("news-symbol-label");
+  const newsLoadingEl = document.getElementById("news-loading");
+  const newsEmptyEl = document.getElementById("news-empty");
+  const newsListEl = document.getElementById("news-list");
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
+  }
+
+  function newsArticleHtml(a) {
+    const dirClass = a.direction === "bullish" ? "up" : a.direction === "bearish" ? "down" : "";
+    const dt = a.datetime
+      ? new Date(a.datetime * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "";
+    const meta = [dt, a.source].filter(Boolean).map(escapeHtml).join(" · ");
+    return `
+      <a class="news-item" href="${escapeHtml(a.url) || "#"}" target="_blank" rel="noopener noreferrer">
+        <div class="news-item-top">
+          <span class="news-category ${dirClass}">${escapeHtml(a.category_label)}</span>
+          <span class="news-time">${meta}</span>
+        </div>
+        <div class="news-headline">${escapeHtml(a.headline)}</div>
+        <div class="news-note ${dirClass}">${escapeHtml(a.note)}</div>
+      </a>`;
+  }
+
+  async function openNews() {
+    newsSymbolLabelEl.textContent = `· ${currentSymbol}`;
+    newsModal.classList.add("open");
+    newsListEl.innerHTML = "";
+    newsEmptyEl.classList.add("hidden-screen");
+    newsLoadingEl.classList.remove("hidden-screen");
+    try {
+      const resp = await fetch(`/api/news/${encodeURIComponent(currentSymbol)}`);
+      const data = await resp.json();
+      newsLoadingEl.classList.add("hidden-screen");
+      const articles = data.articles || [];
+      if (!articles.length) {
+        newsEmptyEl.classList.remove("hidden-screen");
+        return;
+      }
+      newsListEl.innerHTML = articles.map(newsArticleHtml).join("");
+    } catch (e) {
+      newsLoadingEl.classList.add("hidden-screen");
+      newsEmptyEl.textContent = "Couldn't load news right now.";
+      newsEmptyEl.classList.remove("hidden-screen");
+    }
+  }
+
+  document.getElementById("news-close").addEventListener("click", () => newsModal.classList.remove("open"));
+  newsModal.addEventListener("click", (e) => { if (e.target === newsModal) newsModal.classList.remove("open"); });
+  document.getElementById("news-btn-dash").addEventListener("click", openNews);
+  document.getElementById("menu-news").addEventListener("click", () => {
+    const recents = getRecents();
+    enterApp(recents[0] || "AAPL");
+    setTimeout(openNews, 480);
+  });
+
   // --- economic calendar ---
 
   let lastCalendarEvents = [];
@@ -1931,6 +2069,20 @@ const PATTERN_INFO = {
   setInterval(pollAlerts, 20000);
   pollAlerts();
 
+  // --- market status badge ---
+
+  const marketStatusBadge = document.getElementById("market-status-badge");
+  async function refreshMarketStatus() {
+    try {
+      const resp = await fetch("/api/market-status");
+      const data = await resp.json();
+      marketStatusBadge.textContent = data.label;
+      marketStatusBadge.className = `market-status-badge status-${data.status}`;
+    } catch (e) { /* non-critical, try again next interval */ }
+  }
+  setInterval(refreshMarketStatus, 60000);
+  refreshMarketStatus();
+
   // --- paper trading portfolio ---
 
   const portfolioModal = document.getElementById("portfolio-modal");
@@ -2068,4 +2220,5 @@ const PATTERN_INFO = {
   checkForUpdate();
 
   renderRecents();
+  renderDigest();
 })();

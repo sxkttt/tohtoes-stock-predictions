@@ -54,11 +54,13 @@ def to_yahoo_symbol(symbol: str) -> str:
     return symbol
 
 
-async def _fetch(symbol: str, rng: str, interval: str) -> list[dict]:
+async def _fetch(symbol: str, rng: str, interval: str, include_prepost: bool = False) -> list[dict]:
     yahoo_symbol = to_yahoo_symbol(symbol)
 
     url = YAHOO_CHART_URL.format(symbol=yahoo_symbol)
     params = {"range": rng, "interval": interval}
+    if include_prepost:
+        params["includePrePost"] = "true"
 
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(url, params=params, headers=_HEADERS)
@@ -90,14 +92,16 @@ async def _fetch(symbol: str, rng: str, interval: str) -> list[dict]:
     return candles
 
 
-async def fetch_candles(symbol: str, period: str) -> list[dict]:
+async def fetch_candles(symbol: str, period: str, include_prepost: bool = False) -> list[dict]:
     if period not in RANGE_INTERVAL_PRESETS:
         raise ValueError(f"unknown period: {period}")
     rng, interval = RANGE_INTERVAL_PRESETS[period]
-    return await _fetch(symbol, rng, interval)
+    return await _fetch(symbol, rng, interval, include_prepost)
 
 
-async def fetch_candles_custom(symbol: str, period: str, interval: str) -> tuple[list[dict], str]:
+async def fetch_candles_custom(
+    symbol: str, period: str, interval: str, include_prepost: bool = False
+) -> tuple[list[dict], str]:
     """Same range as the given display period, but with a user-chosen candle
     interval instead of that period's default -- lets the main chart show
     e.g. hourly candles over a 3-month window instead of only daily.
@@ -112,7 +116,7 @@ async def fetch_candles_custom(symbol: str, period: str, interval: str) -> tuple
     allowed = INTERVAL_COMPAT.get(period, [default_interval])
     if interval not in allowed:
         interval = default_interval
-    candles = await _fetch(symbol, rng, interval)
+    candles = await _fetch(symbol, rng, interval, include_prepost)
     return candles, interval
 
 
