@@ -1204,6 +1204,14 @@ h1, h2, .brand-name, .menu-title, .start-tagline {
   transition: border-color 0.2s ease;
 }
 
+.extremes-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.extremes-badge {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: "Space Grotesk", monospace;
+}
+.extremes-badge:empty { display: none; }
+
 .period-row {
   display: flex;
   align-items: center;

@@ -333,6 +333,39 @@ async def news_endpoint(symbol: str):
     return await news.fetch_news(symbol.upper())
 
 
+@app.get("/api/price-extremes/{symbol}")
+async def price_extremes_endpoint(symbol: str):
+    """52-week high/low (from Finnhub's fundamentals metrics, already
+    cached there) plus the true all-time high/low (from Yahoo's full
+    history). Either half can be unavailable independently -- e.g. a
+    crypto pair has no Finnhub fundamentals -- so each is null rather
+    than failing the whole response."""
+    symbol = symbol.upper()
+    log = logging.getLogger("main")
+
+    context_task = fundamentals.fetch_context(symbol)
+    ath_task = history.fetch_all_time_range(symbol)
+    context, all_time = await asyncio.gather(context_task, ath_task, return_exceptions=True)
+
+    if isinstance(context, Exception):
+        log.warning("price-extremes fundamentals fetch failed for %s", symbol)
+        context = None
+    if isinstance(all_time, Exception):
+        log.warning("price-extremes all-time-range fetch failed for %s", symbol)
+        all_time = None
+
+    metrics = (context or {}).get("metrics") or {}
+    return {
+        "symbol": symbol,
+        "week52_high": metrics.get("week52_high"),
+        "week52_low": metrics.get("week52_low"),
+        "all_time_high": (all_time or {}).get("high"),
+        "all_time_high_date": (all_time or {}).get("high_date"),
+        "all_time_low": (all_time or {}).get("low"),
+        "all_time_low_date": (all_time or {}).get("low_date"),
+    }
+
+
 @app.get("/api/market-status")
 async def market_status_endpoint(response: Response):
     response.headers["Cache-Control"] = "no-store"

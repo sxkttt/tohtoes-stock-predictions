@@ -589,6 +589,40 @@ const PATTERN_INFO = {
     }
   }
 
+  // --- 52-week / all-time high-low badges ---
+
+  function extremesBadgeText(label, current, high, low) {
+    if (high == null && low == null) return "";
+    const parts = [];
+    if (high != null) parts.push(`H $${high.toFixed(2)}`);
+    if (low != null) parts.push(`L $${low.toFixed(2)}`);
+    let note = "";
+    if (current != null && high != null && high > 0) {
+      const diff = ((current - high) / high) * 100;
+      note = diff >= -0.05 ? " · at high" : ` · ${diff.toFixed(1)}% from high`;
+    }
+    return `${label}: ${parts.join(" / ")}${note}`;
+  }
+
+  let priceExtremesRequestId = 0;
+
+  async function loadPriceExtremes(symbol) {
+    const requestId = ++priceExtremesRequestId;
+    const week52El = document.getElementById("week52-badge");
+    const athEl = document.getElementById("ath-badge");
+    week52El.textContent = "";
+    athEl.textContent = "";
+    try {
+      const resp = await fetch(`/api/price-extremes/${encodeURIComponent(symbol)}`);
+      const data = await resp.json();
+      if (requestId !== priceExtremesRequestId) return; // a newer symbol was picked meanwhile
+      week52El.textContent = extremesBadgeText("52W", lastClose, data.week52_high, data.week52_low);
+      athEl.textContent = extremesBadgeText("ATH", lastClose, data.all_time_high, data.all_time_low);
+    } catch (e) {
+      // non-critical -- badges just stay empty
+    }
+  }
+
   async function loadSymbol(symbol) {
     symbol = symbol.trim().toUpperCase();
     if (!symbol) return;
@@ -600,6 +634,7 @@ const PATTERN_INFO = {
     refreshWatchlistStar();
     clearCompare();
     await selectPeriod("LIVE");
+    loadPriceExtremes(symbol);
   }
 
   function connectWs(symbol) {

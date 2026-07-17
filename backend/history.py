@@ -4,6 +4,9 @@ Used as a fallback for anything beyond the live in-memory/DB tick stream:
 longer timeframes (1M/3M/1Y/5Y) and any view of the chart while the market
 is closed and no live ticks are coming in. No API key required.
 """
+import time
+from datetime import datetime, timezone
+
 import httpx
 
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -127,3 +130,39 @@ async def fetch_candles_interval(symbol: str, interval_key: str) -> list[dict]:
         raise ValueError(f"unknown advisor interval: {interval_key}")
     rng, interval = ADVISOR_INTERVALS[interval_key]
     return await _fetch(symbol, rng, interval)
+
+
+_ATH_CACHE_TTL_SECONDS = 24 * 60 * 60  # true all-time extremes barely move day to day
+_ath_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+async def fetch_all_time_range(symbol: str) -> dict | None:
+    """All-time high/low, sourced from Yahoo's full available history at a
+    monthly granularity -- coarse enough to keep the payload small even for
+    a 50-year-old stock, fine enough that the high/low bar is still
+    essentially exact (a true intraday-precision ATH would need daily data
+    back to IPO, which Yahoo doesn't reliably serve that far back anyway).
+    Returns None if Yahoo has no usable history for this symbol."""
+    cached = _ath_cache.get(symbol)
+    if cached and time.time() - cached[0] < _ATH_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        candles = await _fetch(symbol, "max", "1mo")
+    except Exception:
+        candles = []
+
+    if not candles:
+        _ath_cache[symbol] = (time.time(), None)
+        return None
+
+    high_bar = max(candles, key=lambda c: c["high"])
+    low_bar = min(candles, key=lambda c: c["low"])
+    result = {
+        "high": high_bar["high"],
+        "high_date": datetime.fromtimestamp(high_bar["time"], tz=timezone.utc).strftime("%Y-%m"),
+        "low": low_bar["low"],
+        "low_date": datetime.fromtimestamp(low_bar["time"], tz=timezone.utc).strftime("%Y-%m"),
+    }
+    _ath_cache[symbol] = (time.time(), result)
+    return result
