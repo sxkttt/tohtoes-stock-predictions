@@ -1,47 +1,127 @@
-// --- floating particle background for the start screen ---
-(function initParticles() {
+// --- start screen background: a live trace being drawn ---
+// The instrument's defining act is watching a signal arrive, so the start
+// screen shows exactly that: a procedural walk rendered as candles scrolling
+// right-to-left across an engraved graticule. Colours follow the app's rule --
+// green/red for direction only.
+(function initTraceBackground() {
   const canvas = document.getElementById("start-particles");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const startScreen = document.getElementById("start-screen");
-  let w, h, particles;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  function resize() {
-    w = canvas.width = canvas.offsetWidth;
-    h = canvas.height = canvas.offsetHeight;
+  const CANDLE_W = 7;
+  const GAP = 4;
+  const STEP = CANDLE_W + GAP;
+  const CELL = 44;              // graticule pitch, matched to the readout window
+  const SPEED = 0.28;           // px per frame
+
+  let w = 0, h = 0, dpr = 1;
+  let candles = [];
+  let offset = 0;
+  let price = 100;
+
+  function themeColors() {
+    const light = document.documentElement.getAttribute("data-theme") === "light";
+    return light
+      ? { up: "18,136,92", down: "198,47,61", grid: "0,0,0", gridAlpha: 0.05, alpha: 0.16 }
+      : { up: "61,214,140", down: "242,84,91", grid: "255,255,255", gridAlpha: 0.022, alpha: 0.2 };
   }
 
-  function makeParticles(n) {
-    particles = Array.from({ length: n }, () => ({
-      x: Math.random() * w,
-      y: Math.random() * h,
-      r: 1 + Math.random() * 2,
-      speed: 0.15 + Math.random() * 0.35,
-      drift: (Math.random() - 0.5) * 0.3,
-      hue: Math.random() < 0.5 ? "38,217,154" : "91,140,255",
-      alpha: 0.15 + Math.random() * 0.35,
-    }));
+  function nextCandle() {
+    // random walk with mild mean reversion so the trace stays on screen
+    const drift = (100 - price) * 0.01;
+    const open = price;
+    const close = open + drift + (Math.random() - 0.5) * 2.4;
+    const wick = Math.random() * 1.6;
+    price = close;
+    return {
+      open,
+      close,
+      high: Math.max(open, close) + wick,
+      low: Math.min(open, close) - wick,
+    };
+  }
+
+  function resize() {
+    const nw = canvas.offsetWidth;
+    const nh = canvas.offsetHeight;
+    if (!nw || !nh) return;   // start screen is hidden — keep the last reading
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = nw;
+    h = nh;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const needed = Math.ceil(w / STEP) + 3;
+    while (candles.length < needed) candles.push(nextCandle());
+    if (candles.length > needed) candles = candles.slice(candles.length - needed);
+  }
+
+  function draw() {
+    const c = themeColors();
+    ctx.clearRect(0, 0, w, h);
+
+    // engraved graticule
+    ctx.strokeStyle = `rgba(${c.grid},${c.gridAlpha})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = -((offset % CELL)) + 0.5; x < w; x += CELL) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+    for (let y = 0.5; y < h; y += CELL / 2) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    ctx.stroke();
+
+    // scale the walk into the lower two-thirds of the screen
+    let lo = Infinity, hi = -Infinity;
+    candles.forEach((k) => { lo = Math.min(lo, k.low); hi = Math.max(hi, k.high); });
+    const span = Math.max(hi - lo, 1);
+    const top = h * 0.34;
+    const height = h * 0.58;
+    const y = (v) => top + height - ((v - lo) / span) * height;
+
+    candles.forEach((k, i) => {
+      const x = i * STEP - (offset % STEP);
+      const rising = k.close >= k.open;
+      ctx.strokeStyle = `rgba(${rising ? c.up : c.down},${c.alpha})`;
+      ctx.fillStyle = `rgba(${rising ? c.up : c.down},${c.alpha})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x + CANDLE_W / 2) + 0.5, y(k.high));
+      ctx.lineTo(Math.round(x + CANDLE_W / 2) + 0.5, y(k.low));
+      ctx.stroke();
+      const bodyTop = y(Math.max(k.open, k.close));
+      const bodyH = Math.max(y(Math.min(k.open, k.close)) - bodyTop, 1);
+      ctx.fillRect(Math.round(x), bodyTop, CANDLE_W, bodyH);
+    });
   }
 
   function tick() {
-    if (!startScreen.classList.contains("hidden-screen") && w && h) {
-      ctx.clearRect(0, 0, w, h);
-      particles.forEach((p) => {
-        p.y -= p.speed;
-        p.x += p.drift;
-        if (p.y < -5) { p.y = h + 5; p.x = Math.random() * w; }
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${p.hue},${p.alpha})`;
-        ctx.fill();
-      });
+    if (!startScreen.classList.contains("hidden-screen")) {
+      // the canvas has no size while the start screen is hidden, so re-measure
+      // whenever it comes back or the window changed underneath it
+      if (canvas.offsetWidth !== w || canvas.offsetHeight !== h) resize();
+      if (w && h) {
+        offset += SPEED;
+        while (offset >= STEP) {
+          offset -= STEP;
+          candles.shift();
+          candles.push(nextCandle());
+        }
+        draw();
+      }
     }
     requestAnimationFrame(tick);
   }
 
-  window.addEventListener("resize", resize);
+  // hold a single still reading instead of scrolling one
+  const redraw = () => { resize(); if (w && h) draw(); };
+
+  window.addEventListener("resize", reduceMotion ? redraw : resize);
+  if (reduceMotion) {
+    redraw();
+    window.addEventListener("load", redraw);
+    return;
+  }
   resize();
-  makeParticles(60);
   tick();
 })();
 
@@ -124,31 +204,31 @@ const PATTERN_INFO = {
   const advisorShowChartCheckbox = document.getElementById("advisor-show-chart");
 
   const chart = LightweightCharts.createChart(chartEl, {
-    layout: { background: { color: "transparent" }, textColor: "#c7ccd8" },
+    layout: { background: { color: "transparent" }, textColor: "#9aa8b0" },
     grid: {
       vertLines: { color: "rgba(255,255,255,0.04)" },
       horzLines: { color: "rgba(255,255,255,0.04)" },
     },
-    timeScale: { timeVisible: true, secondVisible: true, borderColor: "#232a38" },
-    rightPriceScale: { borderColor: "#232a38" },
+    timeScale: { timeVisible: true, secondVisible: true, borderColor: "#2a343a" },
+    rightPriceScale: { borderColor: "#2a343a" },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
 
   const candleSeries = chart.addCandlestickSeries({
-    upColor: "#26d99a", downColor: "#ff5c7a",
-    borderUpColor: "#26d99a", borderDownColor: "#ff5c7a",
-    wickUpColor: "#26d99a", wickDownColor: "#ff5c7a",
+    upColor: "#3dd68c", downColor: "#f2545b",
+    borderUpColor: "#3dd68c", borderDownColor: "#f2545b",
+    wickUpColor: "#3dd68c", wickDownColor: "#f2545b",
   });
 
-  const resistanceSeries = chart.addLineSeries({ color: "#ff5c7a", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
-  const supportSeries = chart.addLineSeries({ color: "#26d99a", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
-  const trendSeries = chart.addLineSeries({ color: "#5b8cff", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+  const resistanceSeries = chart.addLineSeries({ color: "#f2545b", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+  const supportSeries = chart.addLineSeries({ color: "#3dd68c", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false });
+  const trendSeries = chart.addLineSeries({ color: "#6f9fb5", lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
 
   // --- light/dark theme ---
 
-  const THEME_KEY = "tohtoe_theme";
+  const THEME_KEY = "pulsechart_theme";
   const CHART_THEMES = {
-    dark: { textColor: "#c7ccd8", grid: "rgba(255,255,255,0.04)", border: "#232a38" },
+    dark: { textColor: "#9aa8b0", grid: "rgba(255,255,255,0.04)", border: "#2a343a" },
     light: { textColor: "#3a3f4b", grid: "rgba(0,0,0,0.06)", border: "#dde1e8" },
   };
   const MOON_ICON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
@@ -195,7 +275,7 @@ const PATTERN_INFO = {
   function exportChartPng() {
     const shot = chart.takeScreenshot();
     const theme = localStorage.getItem(THEME_KEY) || "dark";
-    const bg = theme === "light" ? "#f5f6f9" : "#0b0e14";
+    const bg = theme === "light" ? "#f4f5f2" : "#0a0d0f";
     const canvas = document.createElement("canvas");
     canvas.width = shot.width;
     canvas.height = shot.height;
@@ -216,7 +296,7 @@ const PATTERN_INFO = {
   let currentInterval = "";
 
   // --- extended-hours (pre/post-market) toggle ---
-  const PREPOST_KEY = "tohtoe_prepost";
+  const PREPOST_KEY = "pulsechart_prepost";
   const PREPOST_PERIODS = new Set(["1D", "1W"]);
   let prepostEnabled = localStorage.getItem(PREPOST_KEY) === "1";
   const prepostBtn = document.getElementById("toggle-prepost");
@@ -273,6 +353,13 @@ const PATTERN_INFO = {
     return n.toFixed(n >= 100 ? 2 : 4);
   }
 
+  // A change of +8 on a $328 stock is not a 4-decimal quantity. Precision
+  // belongs to the instrument's scale, so derive it from the price, not the delta.
+  function fmtDelta(n, reference) {
+    if (n === null || n === undefined || Number.isNaN(n)) return "--";
+    return n.toFixed(Math.abs(reference) >= 100 ? 2 : 4);
+  }
+
   // --- Thailand time (ICT, UTC+7, no DST) ---
   // Lightweight Charts renders timestamps as UTC digits, so every incoming
   // timestamp is shifted by the Thailand offset once at ingestion; the chart
@@ -319,7 +406,7 @@ const PATTERN_INFO = {
     if (firstClose === null) firstClose = price;
     const change = price - firstClose;
     const pct = firstClose ? (change / firstClose) * 100 : 0;
-    priceChangeEl.textContent = `${change >= 0 ? "+" : ""}${fmt(change)} (${pct.toFixed(2)}%)`;
+    priceChangeEl.textContent = `${change >= 0 ? "+" : ""}${fmtDelta(change, price)} (${pct.toFixed(2)}%)`;
     priceChangeEl.classList.toggle("up", change >= 0);
     priceChangeEl.classList.toggle("down", change < 0);
 
@@ -343,7 +430,7 @@ const PATTERN_INFO = {
     levelPriceLines = [];
     (overlay.levels || []).forEach((lvl) => {
       const pl = candleSeries.createPriceLine({
-        price: lvl, color: "#ffb84d", lineWidth: 1,
+        price: lvl, color: "#f2b33d", lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: true,
         title: "S/R",
       });
@@ -364,12 +451,12 @@ const PATTERN_INFO = {
   }
 
   function renderMarkerChart(markers) {
-    const dirColor = { bullish: "#26d99a", bearish: "#ff5c7a", neutral: "#ffb84d" };
+    const dirColor = { bullish: "#3dd68c", bearish: "#f2545b", neutral: "#f2b33d" };
     const dirShape = { bullish: "arrowUp", bearish: "arrowDown", neutral: "circle" };
     const patternMarkers = markers.map((m) => ({
       time: m.time,
       position: m.direction === "bearish" ? "aboveBar" : "belowBar",
-      color: dirColor[m.direction] || "#5b8cff",
+      color: dirColor[m.direction] || "#6f9fb5",
       shape: dirShape[m.direction] || "circle",
       text: m.pattern,
     }));
@@ -785,7 +872,7 @@ const PATTERN_INFO = {
 
   // --- start screen: recent symbols, navigation, about modal ---
 
-  const RECENTS_KEY = "tohtoe_recents";
+  const RECENTS_KEY = "pulsechart_recents";
 
   function getRecents() {
     try { return JSON.parse(localStorage.getItem(RECENTS_KEY)) || []; } catch (e) { return []; }
@@ -820,7 +907,7 @@ const PATTERN_INFO = {
 
   // --- "what changed" digest ---
 
-  const DIGEST_KEY = "tohtoe_digest_snapshot";
+  const DIGEST_KEY = "pulsechart_digest_snapshot";
   const DIGEST_MOVE_THRESHOLD = 3; // percent
   let digestRequestId = 0;
 
@@ -1036,14 +1123,14 @@ const PATTERN_INFO = {
     if (!advisorShowChartCheckbox.checked || !result || !result.buy) return;
     result.buy.forEach((tier) => {
       advisorPriceLines.push(candleSeries.createPriceLine({
-        price: tier.price, color: "#26d99a", lineWidth: 1,
+        price: tier.price, color: "#3dd68c", lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true,
         title: `Buy (${tier.tier})`,
       }));
     });
     result.sell.forEach((tier) => {
       advisorPriceLines.push(candleSeries.createPriceLine({
-        price: tier.price, color: "#ff5c7a", lineWidth: 1,
+        price: tier.price, color: "#f2545b", lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true,
         title: `Sell (${tier.tier})`,
       }));
@@ -1228,7 +1315,7 @@ const PATTERN_INFO = {
 
   // --- indicator sub-panes (RSI / MACD / ADX) ---
 
-  const INDICATOR_PANES_KEY = "tohtoe_indicator_panes";
+  const INDICATOR_PANES_KEY = "pulsechart_indicator_panes";
   const indicatorCharts = {};
   let syncingRange = false;
 
@@ -1254,16 +1341,16 @@ const PATTERN_INFO = {
     });
     const series = {};
     if (kind === "rsi") {
-      series.rsi = paneChart.addLineSeries({ color: "#9d7bff", lineWidth: 1.5, priceLineVisible: false });
-      series.rsi.createPriceLine({ price: 70, color: "#ff5c7a", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false });
-      series.rsi.createPriceLine({ price: 30, color: "#26d99a", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false });
+      series.rsi = paneChart.addLineSeries({ color: "#f2b33d", lineWidth: 1.5, priceLineVisible: false });
+      series.rsi.createPriceLine({ price: 70, color: "#f2545b", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false });
+      series.rsi.createPriceLine({ price: 30, color: "#3dd68c", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false });
     } else if (kind === "macd") {
       series.hist = paneChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
-      series.macd = paneChart.addLineSeries({ color: "#5b8cff", lineWidth: 1.5, priceLineVisible: false });
-      series.signal = paneChart.addLineSeries({ color: "#ffb84d", lineWidth: 1.5, priceLineVisible: false });
+      series.macd = paneChart.addLineSeries({ color: "#6f9fb5", lineWidth: 1.5, priceLineVisible: false });
+      series.signal = paneChart.addLineSeries({ color: "#f2b33d", lineWidth: 1.5, priceLineVisible: false });
     } else if (kind === "adx") {
-      series.adx = paneChart.addLineSeries({ color: "#5b8cff", lineWidth: 1.5, priceLineVisible: false });
-      series.adx.createPriceLine({ price: 25, color: "#8a93a6", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false });
+      series.adx = paneChart.addLineSeries({ color: "#6f9fb5", lineWidth: 1.5, priceLineVisible: false });
+      series.adx.createPriceLine({ price: 25, color: "#7c8b93", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false });
     }
 
     paneChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
@@ -1298,7 +1385,7 @@ const PATTERN_INFO = {
         indicatorCharts.rsi.series.rsi.setData(series.filter((s) => s.rsi != null).map((s) => ({ time: s.time, value: s.rsi })));
       }
       if (indicatorCharts.macd) {
-        indicatorCharts.macd.series.hist.setData(series.filter((s) => s.hist != null).map((s) => ({ time: s.time, value: s.hist, color: s.hist >= 0 ? "#26d99a" : "#ff5c7a" })));
+        indicatorCharts.macd.series.hist.setData(series.filter((s) => s.hist != null).map((s) => ({ time: s.time, value: s.hist, color: s.hist >= 0 ? "#3dd68c" : "#f2545b" })));
         indicatorCharts.macd.series.macd.setData(series.filter((s) => s.macd != null).map((s) => ({ time: s.time, value: s.macd })));
         indicatorCharts.macd.series.signal.setData(series.filter((s) => s.signal != null).map((s) => ({ time: s.time, value: s.signal })));
       }
@@ -1334,7 +1421,7 @@ const PATTERN_INFO = {
 
   // --- VWAP bands (drawn on the main chart) ---
 
-  const VWAP_KEY = "tohtoe_vwap";
+  const VWAP_KEY = "pulsechart_vwap";
   let vwapEnabled = false;
   let vwapSeries = null;
 
@@ -1368,7 +1455,7 @@ const PATTERN_INFO = {
     }
     if (!vwapSeries) {
       vwapSeries = {
-        mid: chart.addLineSeries({ color: "#ffb84d", lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false }),
+        mid: chart.addLineSeries({ color: "#f2b33d", lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false }),
         upper1: chart.addLineSeries({ color: "rgba(255,184,77,0.4)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
         lower1: chart.addLineSeries({ color: "rgba(255,184,77,0.4)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false }),
       };
@@ -1396,7 +1483,7 @@ const PATTERN_INFO = {
 
   // --- volume profile (canvas overlay) ---
 
-  const VOLPROFILE_KEY = "tohtoe_volprofile";
+  const VOLPROFILE_KEY = "pulsechart_volprofile";
   let volProfileEnabled = false;
 
   function computeVolumeProfile(candles, bins = 24) {
@@ -1508,7 +1595,7 @@ const PATTERN_INFO = {
 
   // --- drawing tools ---
 
-  const DRAWINGS_KEY = "tohtoe_drawings_v1";
+  const DRAWINGS_KEY = "pulsechart_drawings_v1";
   let activeDrawTool = "none";
   let pendingDrawPoints = [];
 
@@ -1583,7 +1670,7 @@ const PATTERN_INFO = {
 
     const list = getDrawingsForSymbol(currentSymbol);
     const theme = localStorage.getItem(THEME_KEY) || "dark";
-    const lineColor = theme === "light" ? "#3b6fe0" : "#5b8cff";
+    const lineColor = theme === "light" ? "#3c7c98" : "#6f9fb5";
 
     list.forEach((d) => {
       if (d.type === "horizontal") {
@@ -1629,7 +1716,7 @@ const PATTERN_INFO = {
           ctx.moveTo(xLeft, y);
           ctx.lineTo(xRight, y);
           ctx.stroke();
-          ctx.fillStyle = "#ffb84d";
+          ctx.fillStyle = "#f2b33d";
           ctx.font = "10px sans-serif";
           ctx.fillText(`${(lvl * 100).toFixed(1)}% ${fmt(price)}`, xRight + 4, y + 3);
         });
@@ -1773,7 +1860,7 @@ const PATTERN_INFO = {
 
   let lastCalendarEvents = [];
   const CALENDAR_TYPE_LABELS = { fomc: "FOMC", cpi: "CPI", nfp: "Jobs Report", earnings: "Earnings" };
-  const CALENDAR_TYPE_COLORS = { fomc: "#9d7bff", cpi: "#ffb84d", nfp: "#5b8cff", earnings: "#26d99a" };
+  const CALENDAR_TYPE_COLORS = { fomc: "#c9873a", cpi: "#f2b33d", nfp: "#6f9fb5", earnings: "#8fa3ad" };
 
   function computeCalendarChartMarkers() {
     // Calendar events are date-level, not intraday -- only worth plotting
@@ -1793,7 +1880,7 @@ const PATTERN_INFO = {
       if (closest && closestDiff < 3 * 86400 * 1000) {
         out.push({
           time: closest.time, position: "aboveBar",
-          color: CALENDAR_TYPE_COLORS[e.type] || "#5b8cff", shape: "circle",
+          color: CALENDAR_TYPE_COLORS[e.type] || "#6f9fb5", shape: "circle",
           text: CALENDAR_TYPE_LABELS[e.type] || e.type,
         });
       }
