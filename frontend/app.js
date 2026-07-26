@@ -1,3 +1,60 @@
+// --- preference persistence -------------------------------------------------
+// The desktop shell serves the app from 127.0.0.1 on a port that can change
+// between launches, and the browser scopes localStorage per origin -- so a new
+// port means every saved setting silently disappears. localStorage stays the
+// primary store (it reads synchronously, which the boot path depends on), but
+// every write is mirrored to the server so a fresh origin can recover them.
+
+const PREF_KEYS = [
+  "pulsechart_theme",
+  "pulsechart_prepost",
+  "pulsechart_recents",
+  "pulsechart_digest_snapshot",
+  "pulsechart_indicator_panes",
+  "pulsechart_vwap",
+  "pulsechart_volprofile",
+  "pulsechart_drawings_v1",
+];
+
+let _prefQueue = {};
+let _prefTimer = null;
+
+function persistPref(key, value) {
+  localStorage.setItem(key, value);
+  _prefQueue[key] = value;
+  clearTimeout(_prefTimer);
+  _prefTimer = setTimeout(() => {
+    const values = _prefQueue;
+    _prefQueue = {};
+    fetch("/api/prefs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values }),
+    }).catch(() => {});   // a failed mirror must never break the UI
+  }, 400);
+}
+
+// If this origin has no settings but the server does, this is a port change
+// rather than a first run: restore them and reload once so the normal
+// synchronous boot path picks them up.
+(function restorePrefsIfFreshOrigin() {
+  const MARKER = "pulsechart_prefs_restored";
+  if (sessionStorage.getItem(MARKER)) return;
+  sessionStorage.setItem(MARKER, "1");
+  if (PREF_KEYS.some((k) => localStorage.getItem(k) !== null)) return;
+
+  fetch("/api/prefs")
+    .then((r) => r.json())
+    .then((data) => {
+      const prefs = (data && data.prefs) || {};
+      const keys = Object.keys(prefs).filter((k) => PREF_KEYS.includes(k));
+      if (!keys.length) return;
+      keys.forEach((k) => localStorage.setItem(k, prefs[k]));
+      location.reload();
+    })
+    .catch(() => {});
+})();
+
 // --- start screen background: a live trace being drawn ---
 // The instrument's defining act is watching a signal arrive, so the start
 // screen shows exactly that: a procedural walk rendered as candles scrolling
@@ -245,7 +302,7 @@ const PATTERN_INFO = {
   }
 
   function setTheme(theme) {
-    localStorage.setItem(THEME_KEY, theme);
+    persistPref(THEME_KEY, theme);
     document.documentElement.setAttribute("data-theme", theme);
     applyChartTheme(theme);
     const t = CHART_THEMES[theme] || CHART_THEMES.dark;
@@ -866,7 +923,7 @@ const PATTERN_INFO = {
 
   prepostBtn.addEventListener("click", () => {
     prepostEnabled = !prepostEnabled;
-    localStorage.setItem(PREPOST_KEY, prepostEnabled ? "1" : "0");
+    persistPref(PREPOST_KEY, prepostEnabled ? "1" : "0");
     selectPeriod(currentPeriod, { allowFallback: false });
   });
 
@@ -881,7 +938,7 @@ const PATTERN_INFO = {
   function pushRecent(symbol) {
     let list = getRecents().filter((s) => s !== symbol);
     list.unshift(symbol);
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 6)));
+    persistPref(RECENTS_KEY, JSON.stringify(list.slice(0, 6)));
   }
 
   function renderRecents() {
@@ -945,7 +1002,7 @@ const PATTERN_INFO = {
 
       const newSnapshot = {};
       quotes.forEach((q) => { newSnapshot[q.symbol] = { price: q.price, verdict: q.last_verdict }; });
-      localStorage.setItem(DIGEST_KEY, JSON.stringify(newSnapshot));
+      persistPref(DIGEST_KEY, JSON.stringify(newSnapshot));
 
       if (!items.length) { digestCard.classList.add("hidden-screen"); return; }
       digestItemsEl.innerHTML = items.map((it) => `
@@ -1323,7 +1380,7 @@ const PATTERN_INFO = {
     try { return JSON.parse(localStorage.getItem(INDICATOR_PANES_KEY)) || []; } catch (e) { return []; }
   }
   function setEnabledPanes(panes) {
-    localStorage.setItem(INDICATOR_PANES_KEY, JSON.stringify(panes));
+    persistPref(INDICATOR_PANES_KEY, JSON.stringify(panes));
   }
 
   function createIndicatorPane(kind) {
@@ -1468,7 +1525,7 @@ const PATTERN_INFO = {
 
   function toggleVwap() {
     vwapEnabled = !vwapEnabled;
-    localStorage.setItem(VWAP_KEY, vwapEnabled ? "1" : "0");
+    persistPref(VWAP_KEY, vwapEnabled ? "1" : "0");
     document.getElementById("toggle-vwap").classList.toggle("active", vwapEnabled);
     if (vwapEnabled) {
       refreshVwap();
@@ -1543,7 +1600,7 @@ const PATTERN_INFO = {
 
   function toggleVolProfile() {
     volProfileEnabled = !volProfileEnabled;
-    localStorage.setItem(VOLPROFILE_KEY, volProfileEnabled ? "1" : "0");
+    persistPref(VOLPROFILE_KEY, volProfileEnabled ? "1" : "0");
     document.getElementById("toggle-volprofile").classList.toggle("active", volProfileEnabled);
     document.getElementById("volprofile-canvas").classList.toggle("hidden-screen", !volProfileEnabled);
     drawVolumeProfile();
@@ -1551,9 +1608,61 @@ const PATTERN_INFO = {
   document.getElementById("toggle-volprofile").addEventListener("click", toggleVolProfile);
 
   // --- compare mode ---
+  // Two stocks at different prices can't be read off one axis, so "% change"
+  // mode replaces the candles with a line measuring both symbols from 0% at
+  // the start of the visible range -- the only way the comparison is honest.
 
   let compareSeries = null;
   let compareSymbol = null;
+  let compareData = null;         // last fetched compare candles, kept for re-normalising
+  let normalizedCompare = false;
+  let mainPctSeries = null;
+
+  function toPctSeries(candles) {
+    const base = candles[0].close;
+    if (!base) return [];
+    return candles.map((c) => ({ time: c.time, value: ((c.close - base) / base) * 100 }));
+  }
+
+  function renderCompare() {
+    // In % mode both symbols share the right-hand axis so they can be read
+    // against each other; otherwise the compare line keeps its own scale.
+    const scaleId = normalizedCompare ? "right" : "compare";
+
+    if (compareSeries) {
+      chart.removeSeries(compareSeries);
+      compareSeries = null;
+    }
+    if (compareData && compareData.length) {
+      compareSeries = chart.addLineSeries({
+        color: "#c98a4b", lineWidth: 2, priceScaleId: scaleId,
+        priceLineVisible: false, lastValueVisible: true, title: compareSymbol,
+      });
+      compareSeries.setData(toPctSeries(compareData));
+      if (!normalizedCompare) {
+        chart.priceScale("compare").applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
+      }
+    }
+
+    if (normalizedCompare && lastCandles.length) {
+      if (!mainPctSeries) {
+        mainPctSeries = chart.addLineSeries({
+          color: "#6f9fb5", lineWidth: 2, priceScaleId: "right",
+          priceLineVisible: false, title: currentSymbol,
+        });
+      } else {
+        mainPctSeries.applyOptions({ title: currentSymbol });
+      }
+      mainPctSeries.setData(toPctSeries(lastCandles));
+      candleSeries.applyOptions({ visible: false });
+    } else {
+      if (mainPctSeries) {
+        chart.removeSeries(mainPctSeries);
+        mainPctSeries = null;
+      }
+      candleSeries.applyOptions({ visible: true });
+    }
+  }
 
   async function loadCompareSymbol(symbol) {
     symbol = symbol.trim().toUpperCase();
@@ -1565,33 +1674,273 @@ const PATTERN_INFO = {
       const resp = await fetch(url);
       const data = await resp.json();
       if (!data.candles || !data.candles.length) return;
-      const shifted = data.candles.map(shiftCandle);
-      const base = shifted[0].close;
-      const pctData = shifted.map((c) => ({ time: c.time, value: ((c.close - base) / base) * 100 }));
-      if (!compareSeries) {
-        compareSeries = chart.addLineSeries({ color: "#ff9d5c", lineWidth: 2, priceScaleId: "compare", priceLineVisible: false, title: symbol });
-        chart.priceScale("compare").applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
-      } else {
-        compareSeries.applyOptions({ title: symbol });
-      }
-      compareSeries.setData(pctData);
+      compareData = data.candles.map(shiftCandle);
       compareSymbol = symbol;
+      renderCompare();
     } catch (e) { /* non-critical */ }
   }
 
   function clearCompare() {
-    if (compareSeries) {
-      chart.removeSeries(compareSeries);
-      compareSeries = null;
-    }
+    compareData = null;
     compareSymbol = null;
     document.getElementById("compare-input").value = "";
+    renderCompare();
+  }
+
+  function setNormalizedCompare(on) {
+    normalizedCompare = on;
+    document.getElementById("compare-pct-btn").classList.toggle("active", on);
+    renderCompare();
   }
 
   document.getElementById("compare-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") loadCompareSymbol(e.target.value);
   });
   document.getElementById("compare-clear-btn").addEventListener("click", clearCompare);
+  document.getElementById("compare-pct-btn").addEventListener("click", () => {
+    setNormalizedCompare(!normalizedCompare);
+  });
+
+  // --- export detected patterns as CSV ---
+
+  function csvCell(value) {
+    const text = value == null ? "" : String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function exportPatternsCsv() {
+    const rows = lastMarkers.filter((m) => activeConfidence.has(m.confidence));
+    if (!rows.length) {
+      showToast("No patterns to export — adjust the confidence filter or load a symbol.");
+      return;
+    }
+
+    const header = ["symbol", "period", "interval", "time_ict", "pattern",
+                    "direction", "confidence", "strength", "open", "high", "low", "close", "volume"];
+    const lines = [header.join(",")];
+
+    rows.forEach((m) => {
+      const c = lastCandles.find((k) => k.time === m.time) || {};
+      lines.push([
+        currentSymbol, currentPeriod, currentInterval || INTERVAL_DEFAULTS[currentPeriod] || "",
+        formatThaiTime(m.time), m.pattern, m.direction, m.confidence, m.strength,
+        c.open, c.high, c.low, c.close, c.volume,
+      ].map(csvCell).join(","));
+    });
+
+    const safeSymbol = currentSymbol.replace(/[^A-Za-z0-9]+/g, "-");
+    const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeSymbol}-patterns-${currentPeriod}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${rows.length} pattern${rows.length === 1 ? "" : "s"} to CSV.`);
+  }
+
+  document.getElementById("patterns-csv-btn").addEventListener("click", exportPatternsCsv);
+
+  // --- calibration: backtest + pattern follow-through ---
+  // The reading is always a deviation from a reference, never a raw rate:
+  // "50% of calls were right" means nothing until you know the market rose
+  // 59% of the time anyway.
+
+  const DEV_SCALE_PP = 30;   // meter runs -30pp .. +30pp
+
+  let calHorizon = "medium";
+  let calLookahead = 5;
+
+  function setDevBar(barEl, edge, thinSample) {
+    barEl.classList.toggle("thin-sample", !!thinSample);
+    if (edge == null || Number.isNaN(edge)) {
+      barEl.style.width = "0";
+      return;
+    }
+    const clamped = Math.max(-DEV_SCALE_PP, Math.min(DEV_SCALE_PP, edge));
+    const pct = (Math.abs(clamped) / DEV_SCALE_PP) * 50;
+    if (clamped >= 0) {
+      barEl.style.left = "50%";
+      barEl.style.right = "auto";
+    } else {
+      barEl.style.right = "50%";
+      barEl.style.left = "auto";
+    }
+    barEl.style.width = `${pct}%`;
+  }
+
+  function signed(n, digits = 1) {
+    if (n == null || Number.isNaN(n)) return "—";
+    return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(digits)}`;
+  }
+
+  function pct(n, digits = 1) {
+    return n == null ? "—" : `${n.toFixed(digits)}%`;
+  }
+
+  async function loadBacktest() {
+    const loading = document.getElementById("cal-backtest-loading");
+    const errorEl = document.getElementById("cal-backtest-error");
+    const body = document.getElementById("cal-backtest-body");
+    loading.classList.remove("hidden-screen");
+    errorEl.classList.add("hidden-screen");
+    body.classList.add("hidden-screen");
+
+    let data;
+    try {
+      const resp = await fetch(`/api/backtest/${encodeURIComponent(currentSymbol)}?horizon=${calHorizon}`);
+      data = await resp.json();
+    } catch (e) {
+      data = { error: "Could not reach the server to run the backtest." };
+    }
+    loading.classList.add("hidden-screen");
+
+    if (data.error) {
+      errorEl.textContent = data.error;
+      errorEl.classList.remove("hidden-screen");
+      return;
+    }
+
+    document.getElementById("cal-edge-value").textContent = signed(data.edge);
+    setDevBar(document.getElementById("cal-edge-bar"), data.edge, data.scored_signals < 20);
+
+    document.getElementById("cal-readings").innerHTML = [
+      ["Hit rate", pct(data.hit_rate)],
+      ["Baseline", pct(data.baseline_up_rate)],
+      ["Scored calls", `${data.scored_signals} of ${data.total_signals}`],
+      ["Avg win", pct(data.avg_win_pct, 2)],
+      ["Avg loss", pct(data.avg_loss_pct, 2)],
+      ["Held", `${data.hold_bars} × ${data.interval}`],
+    ].map(([label, value]) => `
+      <div class="cal-reading">
+        <span class="cal-reading-label">${label}</span>
+        <span class="cal-reading-value">${value}</span>
+      </div>`).join("");
+
+    const order = ["Strong Buy", "Buy", "Hold", "Sell", "Strong Sell"];
+    const rows = order
+      .filter((v) => data.by_verdict[v] && data.by_verdict[v].count > 0)
+      .map((v) => {
+        const g = data.by_verdict[v];
+        return `<div class="cal-row">
+          <span class="cal-row-name">${v}</span>
+          <span class="cal-row-num dim">${g.count}</span>
+          <span class="cal-row-num">${g.hit_rate == null ? "—" : g.hit_rate.toFixed(0) + "%"}</span>
+          <span class="cal-row-num">${g.avg_move_pct == null ? "—" : signed(g.avg_move_pct, 2) + "%"}</span>
+        </div>`;
+      }).join("");
+
+    document.getElementById("cal-verdict-table").innerHTML = `
+      <div class="cal-row cal-head">
+        <span>Verdict</span><span class="cal-row-num">N</span>
+        <span class="cal-row-num">Hit</span><span class="cal-row-num">Avg move</span>
+      </div>${rows}`;
+
+    document.getElementById("cal-backtest-method").textContent = data.method;
+    body.classList.remove("hidden-screen");
+  }
+
+  async function loadPatternStats() {
+    const loading = document.getElementById("cal-patterns-loading");
+    const errorEl = document.getElementById("cal-patterns-error");
+    const body = document.getElementById("cal-patterns-body");
+    loading.classList.remove("hidden-screen");
+    errorEl.classList.add("hidden-screen");
+    body.classList.add("hidden-screen");
+
+    let data;
+    try {
+      const resp = await fetch(
+        `/api/pattern-stats/${encodeURIComponent(currentSymbol)}?period=5Y&lookahead=${calLookahead}`);
+      data = await resp.json();
+    } catch (e) {
+      data = { error: "Could not reach the server to measure pattern outcomes." };
+    }
+    loading.classList.add("hidden-screen");
+
+    if (data.error) {
+      errorEl.textContent = data.error;
+      errorEl.classList.remove("hidden-screen");
+      return;
+    }
+    if (!data.patterns.length) {
+      errorEl.textContent = "No patterns with a measurable outcome in this history.";
+      errorEl.classList.remove("hidden-screen");
+      return;
+    }
+
+    document.getElementById("cal-base-rate").innerHTML =
+      `Across ${data.bars_analyzed} bars, ${currentSymbol} rose over the next ${data.lookahead_bars} bars ` +
+      `<strong>${pct(data.base_rate.up_rate)}</strong> of the time. A pattern only has an edge if it beat that.`;
+
+    const rows = data.patterns.map((p) => {
+      const thin = !p.reliable;
+      const barId = `dev-${p.pattern.replace(/[^A-Za-z0-9]+/g, "")}`;
+      return `<div class="cal-row${thin ? " thin-sample-row" : ""}">
+        <span class="cal-row-name">${p.pattern}<span class="cal-row-dir">${p.direction}</span></span>
+        <span class="cal-row-num dim">${p.occurrences}</span>
+        <span class="cal-row-num cal-row-follow">${pct(p.follow_through_rate, 0)}</span>
+        <span class="dev-meter"><span class="dev-bar${thin ? " thin-sample" : ""}" id="${barId}"></span></span>
+        <span class="cal-row-num">${p.edge_vs_base == null ? "—" : signed(p.edge_vs_base) + "pp"}</span>
+      </div>`;
+    }).join("");
+
+    document.getElementById("cal-pattern-table").innerHTML = `
+      <div class="cal-row cal-head">
+        <span>Pattern</span><span class="cal-row-num">N</span>
+        <span class="cal-row-num cal-row-follow">Follow</span><span>vs. base</span><span class="cal-row-num">Edge</span>
+      </div>${rows}`;
+
+    // Bars are sized after insertion so the CSS transition plays.
+    data.patterns.forEach((p) => {
+      const el = document.getElementById(`dev-${p.pattern.replace(/[^A-Za-z0-9]+/g, "")}`);
+      if (el) setDevBar(el, p.edge_vs_base, !p.reliable);
+    });
+
+    document.getElementById("cal-patterns-method").textContent = data.method;
+    body.classList.remove("hidden-screen");
+  }
+
+  const calibrationModal = document.getElementById("calibration-modal");
+
+  function openCalibration() {
+    document.getElementById("calibration-symbol-label").textContent = currentSymbol;
+    calibrationModal.classList.add("open");
+    loadBacktest();
+    loadPatternStats();
+  }
+
+  document.getElementById("cal-horizon").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-horizon]");
+    if (!btn) return;
+    calHorizon = btn.dataset.horizon;
+    document.querySelectorAll("#cal-horizon .period-btn")
+      .forEach((b) => b.classList.toggle("active", b === btn));
+    loadBacktest();
+  });
+
+  document.getElementById("cal-lookahead").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-lookahead]");
+    if (!btn) return;
+    calLookahead = Number(btn.dataset.lookahead);
+    document.querySelectorAll("#cal-lookahead .period-btn")
+      .forEach((b) => b.classList.toggle("active", b === btn));
+    loadPatternStats();
+  });
+
+  document.getElementById("calibration-close")
+    .addEventListener("click", () => calibrationModal.classList.remove("open"));
+  calibrationModal.addEventListener("click", (e) => {
+    if (e.target === calibrationModal) calibrationModal.classList.remove("open");
+  });
+  document.getElementById("calibration-btn-dash").addEventListener("click", openCalibration);
+  document.getElementById("menu-calibration").addEventListener("click", () => {
+    const recents = getRecents();
+    enterApp(recents[0] || "AAPL");
+    setTimeout(openCalibration, 480);
+  });
 
   // --- drawing tools ---
 
@@ -1608,7 +1957,7 @@ const PATTERN_INFO = {
   function saveDrawingsForSymbol(symbol, list) {
     const all = getAllDrawings();
     all[symbol] = list;
-    localStorage.setItem(DRAWINGS_KEY, JSON.stringify(all));
+    persistPref(DRAWINGS_KEY, JSON.stringify(all));
   }
 
   function setActiveDrawTool(tool) {
@@ -1748,6 +2097,7 @@ const PATTERN_INFO = {
     drawVolumeProfile();
     drawAllDrawings();
     if (compareSymbol) loadCompareSymbol(compareSymbol);
+    else if (normalizedCompare) renderCompare();   // re-normalise the main series to the new range
     loadEconCalendar(currentSymbol);
   }
 

@@ -1062,6 +1062,220 @@ h1, h2, h3, h4,
 .news-note.up   { color: var(--up); }
 .news-note.down { color: var(--down); }
 
+/* ========================= CALIBRATION REPORT =========================
+   These two features answer a different question from the rest of the app:
+   not "what is the signal" but "is this instrument accurate". So they read
+   as a calibration certificate -- a measurement stated against a reference.
+
+   The colour rule holds: tungsten is the instrument's voice, and green/red
+   stay reserved for market direction. "The advisor has an edge" is not a
+   market direction, so it is never colour-coded good/bad. It is read off a
+   deviation scale instead, where position carries the meaning.
+   ===================================================================== */
+
+.calibration-modal { width: min(660px, 94vw); max-height: 86vh; overflow-y: auto; }
+
+.cal-section { margin-top: 22px; }
+.cal-section-title {
+  font-size: 13px;
+  color: var(--ink-dim);
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cal-section-title::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+.cal-controls { margin-bottom: 14px; }
+.cal-controls .period-buttons { width: 100%; }
+.cal-controls .period-btn { flex: 1; }
+
+/* the lit certificate panel */
+.cal-readout {
+  background: var(--readout);
+  border-radius: var(--r-win);
+  padding: 16px 18px 14px;
+  margin-bottom: 12px;
+}
+
+.cal-deviation { display: flex; align-items: baseline; gap: 7px; margin-bottom: 12px; }
+.cal-deviation-value {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--readout-ink);
+}
+.cal-deviation-unit {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 14px;
+  color: var(--readout-ink-dim);
+}
+.cal-deviation-label {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--readout-ink-dim);
+  margin-left: 4px;
+}
+
+/* --- the deviation meter: a bar read against an engraved zero --- */
+
+.dev-meter {
+  position: relative;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.dev-meter::before {          /* engraved zero reference */
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--readout-ink-dim);
+}
+.dev-bar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 0;
+  background: var(--readout-accent);
+  transition: width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              right 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+/* A thin sample is drawn hatched rather than solid, so the uncertainty is
+   in the mark itself instead of a footnote nobody reads. */
+.dev-bar.thin-sample {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--readout-accent) 0 2px,
+    transparent 2px 5px
+  );
+}
+
+.dev-scale {
+  display: flex;
+  justify-content: space-between;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  color: var(--readout-ink-dim);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+
+.cal-readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--readout-rule);
+}
+.cal-reading { display: flex; flex-direction: column; gap: 3px; }
+.cal-reading-label {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--readout-ink-dim);
+}
+.cal-reading-value {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--readout-ink);
+}
+
+/* --- tabular results --- */
+
+.cal-verdict-table, .cal-pattern-table {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-tray);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.cal-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel-2);
+  padding: 8px 11px;
+  font-size: 12px;
+}
+.cal-verdict-table .cal-row { grid-template-columns: 1fr 52px 52px 62px; }
+.cal-pattern-table .cal-row { grid-template-columns: 1fr 40px 58px 74px 62px; }
+
+.cal-row.cal-head {
+  background: var(--panel);
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.cal-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-row-name .cal-row-dir {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-left: 7px;
+}
+.cal-row-num {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+}
+.cal-row-num.dim { color: var(--ink-dim); }
+
+/* inline meter used per table row -- same grammar, smaller */
+.cal-row .dev-meter { height: 12px; background: rgba(127, 140, 148, 0.14); }
+.cal-row .dev-meter::before { background: var(--ink-dim); }
+.cal-row .dev-bar { top: 2px; bottom: 2px; background: var(--tungsten); }
+.cal-row .dev-bar.thin-sample {
+  background: repeating-linear-gradient(90deg, var(--tungsten) 0 2px, transparent 2px 5px);
+}
+
+.cal-row.thin-sample-row .cal-row-name { color: var(--ink-dim); }
+
+.cal-base-rate {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--tungsten);
+  border-radius: var(--r-tray);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.cal-base-rate strong { font-family: "IBM Plex Mono", monospace; color: var(--tungsten); }
+
+.cal-method {
+  font-size: 11px !important;
+  line-height: 1.6;
+  color: var(--ink-dim);
+  border-left: 2px solid var(--rule);
+  padding-left: 10px;
+  margin: 0 0 4px !important;
+}
+
 /* --- start-screen digest --- */
 
 .digest-card {
@@ -1646,6 +1860,19 @@ h1, h2, h3, h4,
   #symbol-input { width: 190px; }
   .start-logo h1 { font-size: 46px; }
   #last-price { font-size: 30px; }
+}
+
+@media (max-width: 560px) {
+  /* The fixed numeric columns leave nothing for the pattern name on a
+     narrow screen, so the name takes its own line and the follow-through
+     percentage drops out -- the deviation meter beside it says the same
+     thing more directly. */
+  .cal-pattern-table .cal-row { grid-template-columns: 34px 1fr 60px; row-gap: 6px; }
+  .cal-pattern-table .cal-row > :first-child { grid-column: 1 / -1; }
+  .cal-row-follow { display: none; }
+  .cal-verdict-table .cal-row { grid-template-columns: 1fr 34px 46px 60px; }
+  .cal-deviation-value { font-size: 28px; }
+  .cal-readings { gap: 14px; }
 }
 
 @media (max-width: 640px) {

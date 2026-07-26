@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     note TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_paper_trades_symbol ON paper_trades(symbol);
+
+-- UI preferences (theme, drawings, indicator panes, ...). These live in the
+-- browser's localStorage for instant synchronous reads at boot, but
+-- localStorage is scoped per origin and the origin includes the port -- so
+-- they are mirrored here to survive a port change.
+CREATE TABLE IF NOT EXISTS prefs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_ts INTEGER NOT NULL
+);
 """
 
 _conn: aiosqlite.Connection | None = None
@@ -330,4 +340,24 @@ async def get_paper_trades(symbol: str | None = None) -> list[dict]:
 
 async def delete_paper_trade(trade_id: int):
     await _conn.execute("DELETE FROM paper_trades WHERE id = ?", (trade_id,))
+    await _conn.commit()
+
+
+async def get_prefs() -> dict[str, str]:
+    cursor = await _conn.execute("SELECT key, value FROM prefs")
+    rows = await cursor.fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+async def set_prefs(values: dict[str, str]):
+    """Upsert a batch of preferences. Values are opaque strings -- the
+    frontend stores exactly what it would have put in localStorage."""
+    if not values:
+        return
+    now = int(time.time())
+    await _conn.executemany(
+        "INSERT INTO prefs (key, value, updated_ts) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_ts = excluded.updated_ts",
+        [(k, v, now) for k, v in values.items()],
+    )
     await _conn.commit()

@@ -13,8 +13,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import (
-    advisor, alerts, config, db, econ_calendar, finnhub_feed, fundamentals, history,
-    indicators, macro, market_status, news, options, patterns, settings, symbols, version,
+    advisor, alerts, backtest, config, db, econ_calendar, finnhub_feed, fundamentals,
+    history, indicators, macro, market_status, news, options, pattern_stats, patterns,
+    settings, symbols, version,
 )
 from .candles import store
 
@@ -298,6 +299,26 @@ async def advisor_accuracy_endpoint():
     return {"stats": await db.get_accuracy_stats()}
 
 
+@app.get("/api/backtest/{symbol}")
+async def backtest_endpoint(symbol: str, response: Response, horizon: str = "medium"):
+    """Replays the technical engine over history so the advisor's confidence
+    numbers can be checked against what price actually did."""
+    response.headers["Cache-Control"] = "no-store"
+    return await backtest.run(symbol.upper(), horizon.lower())
+
+
+@app.get("/api/pattern-stats/{symbol}")
+async def pattern_stats_endpoint(
+    symbol: str, response: Response, period: str = "5Y", lookahead: int = 5
+):
+    """What actually happened in the bars after each detected pattern."""
+    response.headers["Cache-Control"] = "no-store"
+    lookahead = max(1, min(lookahead, 30))
+    if period not in history.RANGE_INTERVAL_PRESETS:
+        period = "5Y"
+    return await pattern_stats.run(symbol.upper(), period, lookahead)
+
+
 # --- market context: sector heatmap, economic calendar, options -----------------
 
 @app.get("/api/sectors")
@@ -426,6 +447,26 @@ async def watchlist_quotes_endpoint():
         r["last_verdict"] = recent[-1]["verdict"] if recent else None
 
     return {"quotes": results}
+
+
+# --- UI preferences -------------------------------------------------------------
+# Mirrors the frontend's localStorage so settings survive a port change (the
+# browser scopes localStorage per origin, and the origin includes the port).
+
+class PrefsPayload(BaseModel):
+    values: dict[str, str] = {}
+
+
+@app.get("/api/prefs")
+async def get_prefs_endpoint(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return {"prefs": await db.get_prefs()}
+
+
+@app.post("/api/prefs")
+async def set_prefs_endpoint(payload: PrefsPayload):
+    await db.set_prefs(payload.values)
+    return {"ok": True}
 
 
 # --- alerts ---------------------------------------------------------------------

@@ -104,7 +104,15 @@
           <span class="menu-sub">What's hot/cold today</span>
         </button>
 
-        <button class="menu-card" id="menu-news" style="--d:8">
+        <button class="menu-card" id="menu-calibration" style="--d:8">
+          <span class="menu-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="16" x2="21" y2="16"></line><line x1="7" y1="16" x2="7" y2="11"></line><line x1="12" y1="16" x2="12" y2="7"></line><line x1="17" y1="16" x2="17" y2="12"></line></svg>
+          </span>
+          <span class="menu-title">Calibration</span>
+          <span class="menu-sub">Did the advisor actually work?</span>
+        </button>
+
+        <button class="menu-card" id="menu-news" style="--d:9">
           <span class="menu-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11l5 5v9a2 2 0 0 1-2 2z"></path><path d="M14 4v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>
           </span>
@@ -344,6 +352,79 @@
     </div>
   </div>
 
+  <div id="calibration-modal" class="modal-backdrop">
+    <div class="modal calibration-modal">
+      <button class="modal-close" id="calibration-close" aria-label="Close">&times;</button>
+      <h2>Calibration <span id="calibration-symbol-label" class="advisor-symbol-label"></span></h2>
+      <p class="sectors-sub">How the advisor and each pattern actually performed on this symbol, measured against
+        what price did next.</p>
+
+      <div class="cal-section">
+        <h3 class="cal-section-title">Advisor backtest</h3>
+
+        <div class="advisor-control-group cal-controls">
+          <label class="settings-label">Horizon</label>
+          <div class="period-buttons" id="cal-horizon">
+            <button class="period-btn" data-horizon="short">Short</button>
+            <button class="period-btn active" data-horizon="medium">Medium</button>
+            <button class="period-btn" data-horizon="long">Long</button>
+          </div>
+        </div>
+
+        <div id="cal-backtest-loading" class="advisor-loading hidden-screen">Replaying the advisor over history…</div>
+        <div id="cal-backtest-error" class="watchlist-empty hidden-screen"></div>
+
+        <div id="cal-backtest-body" class="hidden-screen">
+          <!-- The reading that matters is the deviation from the reference,
+               not the raw hit rate -- a 50% hit rate looks fine until you
+               see it sitting left of the baseline. -->
+          <div class="cal-readout">
+            <div class="cal-deviation">
+              <span class="cal-deviation-value" id="cal-edge-value">—</span>
+              <span class="cal-deviation-unit">pp</span>
+              <span class="cal-deviation-label">vs. baseline</span>
+            </div>
+            <div class="dev-meter" id="cal-edge-meter">
+              <span class="dev-bar" id="cal-edge-bar"></span>
+            </div>
+            <div class="dev-scale">
+              <span>−30</span><span>0</span><span>+30</span>
+            </div>
+            <div class="cal-readings" id="cal-readings"></div>
+          </div>
+          <div class="cal-verdict-table" id="cal-verdict-table"></div>
+          <p class="cal-method" id="cal-backtest-method"></p>
+        </div>
+      </div>
+
+      <div class="cal-section">
+        <h3 class="cal-section-title">Pattern follow-through</h3>
+
+        <div class="advisor-control-group cal-controls">
+          <label class="settings-label">Bars measured after each pattern</label>
+          <div class="period-buttons" id="cal-lookahead">
+            <button class="period-btn" data-lookahead="3">3</button>
+            <button class="period-btn active" data-lookahead="5">5</button>
+            <button class="period-btn" data-lookahead="10">10</button>
+            <button class="period-btn" data-lookahead="20">20</button>
+          </div>
+        </div>
+
+        <div id="cal-patterns-loading" class="advisor-loading hidden-screen">Measuring what happened after each pattern…</div>
+        <div id="cal-patterns-error" class="watchlist-empty hidden-screen"></div>
+
+        <div id="cal-patterns-body" class="hidden-screen">
+          <div class="cal-base-rate" id="cal-base-rate"></div>
+          <div class="cal-pattern-table" id="cal-pattern-table"></div>
+          <p class="cal-method" id="cal-patterns-method"></p>
+        </div>
+      </div>
+
+      <p class="about-disclaimer">Past behaviour on one symbol over one window. Measured, not predicted —
+        and not financial advice.</p>
+    </div>
+  </div>
+
   <div id="toast-container" class="toast-container"></div>
 
   <div id="app-shell" class="app hidden-screen">
@@ -375,6 +456,9 @@
       <button id="alerts-btn-dash" class="home-btn" title="Alerts" aria-label="Alerts">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
         <span id="alerts-badge" class="alerts-badge hidden-screen"></span>
+      </button>
+      <button id="calibration-btn-dash" class="home-btn" title="Calibration — backtest &amp; pattern follow-through" aria-label="Calibration">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="16" x2="21" y2="16"></line><line x1="7" y1="16" x2="7" y2="11"></line><line x1="12" y1="16" x2="12" y2="7"></line><line x1="17" y1="16" x2="17" y2="12"></line></svg>
       </button>
       <button id="news-btn-dash" class="home-btn" title="News" aria-label="News">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11l5 5v9a2 2 0 0 1-2 2z"></path><path d="M14 4v5h5"></path><line x1="8" y1="12" x2="16" y2="12"></line><line x1="8" y1="16" x2="13" y2="16"></line></svg>
@@ -459,6 +543,7 @@
           </div>
           <div class="chart-tools-group compare-group">
             <input id="compare-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Compare vs…">
+            <button class="tool-btn" id="compare-pct-btn" title="Plot both symbols as % change from the start of this range">% change</button>
             <button class="tool-btn" id="compare-clear-btn" title="Clear compare">✕</button>
           </div>
         </div>
@@ -482,6 +567,7 @@
               <button class="conf-btn conf-medium active" data-conf="medium">Med</button>
               <button class="conf-btn conf-low active" data-conf="low">Low</button>
             </div>
+            <button class="tool-btn" id="patterns-csv-btn" title="Download the patterns below as a CSV file">Export CSV</button>
           </div>
           <ul id="pattern-list" class="pattern-list">
             <li class="empty">Waiting for data…</li>

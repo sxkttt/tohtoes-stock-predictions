@@ -54,7 +54,40 @@ def _setup_logging():
     )
 
 
+# The browser scopes localStorage per origin, and the origin includes the
+# port -- so a random port every launch means every launch is a brand-new
+# origin and all saved preferences (theme, drawings, recents, indicator
+# panes, ...) silently vanish. Ports are therefore assigned from a fixed
+# preferred range, in order, so a given machine keeps the same origin across
+# restarts. The OS-assigned fallback only happens if the whole range is
+# occupied; /api/prefs mirrors the settings server-side to cover that case.
+#
+# This edition uses a different range from PulseChart so both apps can run
+# side by side without competing for the same port -- if they shared one,
+# whichever started second would be pushed onto a different origin and lose
+# its settings.
+PREFERRED_PORTS = range(8800, 8821)
+
+
+def _port_is_free(port: int) -> bool:
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
 def _find_free_port() -> int:
+    for port in PREFERRED_PORTS:
+        if _port_is_free(port):
+            return port
+    logging.getLogger(__name__).warning(
+        "Preferred port range %d-%d is fully occupied; falling back to an "
+        "OS-assigned port. Saved settings will be restored from the server.",
+        PREFERRED_PORTS[0], PREFERRED_PORTS[-1],
+    )
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]

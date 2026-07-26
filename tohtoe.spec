@@ -42,6 +42,7 @@ hiddenimports = collect_submodules("multiprocessing") + [
     "backend.settings", "backend.indicators", "backend.fundamentals", "backend.macro", "backend.advisor",
     "backend.alerts", "backend.econ_calendar", "backend.options", "backend.version",
     "backend.market_status", "backend.news",
+    "backend.backtest", "backend.pattern_stats",
 ]
 
 a = Analysis(
